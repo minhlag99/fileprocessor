@@ -1,0 +1,1226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>File Management System</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css">
+    <style>
+        body {
+            padding-top: 2rem;
+            padding-bottom: 2rem;
+        }
+        .admin-alert {
+            background-color: #f8d7da;
+            color: #721c24;
+            padding: 0.75rem 1.25rem;
+            margin-bottom: 1rem;
+            border: 1px solid #f5c6cb;
+            border-radius: 0.25rem;
+        }
+        .admin-alert-icon {
+            margin-right: 0.5rem;
+            font-weight: bold;
+        }
+        .provider-config {
+            display: none;
+            margin-top: 1rem;
+            padding: 1rem;
+            border: 1px solid #dee2e6;
+            border-radius: 0.25rem;
+        }
+        .preview-container {
+            max-width: 100%;
+            max-height: 300px;
+            overflow: auto;
+            margin-top: 1rem;
+            border: 1px solid #dee2e6;
+            padding: 1rem;
+        }
+        .preview-image {
+            max-width: 100%;
+            max-height: 280px;
+        }
+        .file-item {
+            cursor: pointer;
+        }
+        #filePreview {
+            display: none;
+        }
+        /* New styles for real-time processing visualization */
+        .processing-status {
+            display: none;
+            margin-top: 1rem;
+            border: 1px solid #dee2e6;
+            border-radius: 0.25rem;
+            padding: 1rem;
+        }
+        .progress {
+            height: 1.5rem;
+        }
+        .progress-bar {
+            transition: width 0.3s ease;
+        }
+        .step-indicator {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 1rem;
+        }
+        .step {
+            width: 2rem;
+            height: 2rem;
+            border-radius: 50%;
+            background-color: #e9ecef;
+            color: #495057;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+        .step.active {
+            background-color: #0d6efd;
+            color: white;
+        }
+        .step.completed {
+            background-color: #198754;
+            color: white;
+        }
+        .step-line {
+            flex: 1;
+            height: 3px;
+            background-color: #e9ecef;
+            margin: 1rem 0.5rem;
+        }
+        .step-line.active {
+            background-color: #0d6efd;
+        }
+        .step-label {
+            position: absolute;
+            top: 2.5rem;
+            left: 50%;
+            transform: translateX(-50%);
+            white-space: nowrap;
+            font-size: 0.8rem;
+        }
+        .lan-section {
+            margin-top: 2rem;
+            display: none;
+        }
+        #realTimeLog {
+            height: 150px;
+            overflow-y: auto;
+            font-family: monospace;
+            background-color: #f8f9fa;
+            padding: 0.5rem;
+            border-radius: 0.25rem;
+            border: 1px solid #dee2e6;
+            margin-top: 1rem;
+        }
+        .log-entry {
+            margin-bottom: 0.25rem;
+        }
+        .log-time {
+            color: #6c757d;
+        }
+        .log-info {
+            color: #0d6efd;
+        }
+        .log-success {
+            color: #198754;
+        }
+        .log-warning {
+            color: #ffc107;
+        }
+        .log-error {
+            color: #dc3545;
+        }
+        .workflow-visualization {
+            width: 100%;
+            margin-top: 2rem;
+            text-align: center;
+        }
+        .workflow-visualization img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 0.25rem;
+            box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Admin privilege notification alert -->
+        <div class="row mb-3">
+            <div class="col">
+                <div class="admin-alert">
+                    <span class="admin-alert-icon">⚠️</span>
+                    This application requires administrator privileges to run properly. Please make sure to run the server using the start_server.bat file with "Run as administrator" option.
+                </div>
+            </div>
+        </div>
+        
+        <div class="row mb-4">
+            <div class="col">
+                <h1>File Management System</h1>
+                <p class="lead">Upload, manage, and process different file types with cloud storage integration</p>
+            </div>
+        </div>
+
+        <!-- Workflow visualization showing the file processing flow -->
+        <div class="row mb-4">
+            <div class="col">
+                <div class="workflow-visualization">
+                    <img id="workflowGif" src="/workflow.gif" alt="File Processing Workflow" loading="lazy">
+                </div>
+            </div>
+        </div>
+
+        <div class="row mb-3">
+            <div class="col">
+                <div class="card">
+                    <div class="card-header">
+                        <h5>Storage Provider Status</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table">
+                                <thead>
+                                    <tr>
+                                        <th>Provider</th>
+                                        <th>Status</th>
+                                        <th>Details</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="providerStatusList">
+                                    <tr>
+                                        <td colspan="3" class="text-center">Loading provider status...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row mb-4">
+            <div class="col">
+                <div class="card">
+                    <div class="card-header">
+                        <h5>Upload File</h5>
+                    </div>
+                    <div class="card-body">
+                        <form id="uploadForm">
+                            <div class="mb-3">
+                                <label for="fileInput" class="form-label">Select File</label>
+                                <input type="file" class="form-control" id="fileInput" required>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="storageType" class="form-label">Storage Provider</label>
+                                <select class="form-select" id="storageType">
+                                    <option value="local" selected>Local Storage</option>
+                                    <option value="s3">Amazon S3</option>
+                                    <option value="google">Google Cloud Storage</option>
+                                </select>
+                            </div>
+
+                            <div id="s3Config" class="provider-config">
+                                <h6>Amazon S3 Configuration</h6>
+                                <div class="mb-2">
+                                    <label for="s3Region" class="form-label">Region</label>
+                                    <input type="text" class="form-control" id="s3Region" placeholder="e.g., us-east-1">
+                                </div>
+                                <div class="mb-2">
+                                    <label for="s3Bucket" class="form-label">Bucket</label>
+                                    <input type="text" class="form-control" id="s3Bucket" placeholder="Your S3 bucket name">
+                                </div>
+                                <div class="mb-2">
+                                    <label for="s3AccessKey" class="form-label">Access Key</label>
+                                    <input type="text" class="form-control" id="s3AccessKey" placeholder="AWS access key">
+                                </div>
+                                <div class="mb-2">
+                                    <label for="s3SecretKey" class="form-label">Secret Key</label>
+                                    <input type="password" class="form-control" id="s3SecretKey" placeholder="AWS secret key">
+                                </div>
+                                <div class="mb-2">
+                                    <label for="s3Prefix" class="form-label">Prefix (Optional)</label>
+                                    <input type="text" class="form-control" id="s3Prefix" placeholder="e.g., folder/">
+                                </div>
+                            </div>
+
+                            <div id="googleConfig" class="provider-config">
+                                <h6>Google Cloud Storage Configuration</h6>
+                                <div class="mb-2">
+                                    <label for="gcsBucket" class="form-label">Bucket</label>
+                                    <input type="text" class="form-control" id="gcsBucket" placeholder="Your GCS bucket name">
+                                </div>
+                                <div class="mb-2">
+                                    <label for="gcsCredFile" class="form-label">Credential File Path</label>
+                                    <input type="text" class="form-control" id="gcsCredFile" placeholder="Path to service account JSON file">
+                                </div>
+                                <div class="mb-2">
+                                    <label for="gcsPrefix" class="form-label">Prefix (Optional)</label>
+                                    <input type="text" class="form-control" id="gcsPrefix" placeholder="e.g., folder/">
+                                </div>
+                            </div>
+
+                            <div class="form-check mb-3">
+                                <input type="checkbox" class="form-check-input" id="processFile" checked>
+                                <label class="form-check-label" for="processFile">Process file after upload</label>
+                            </div>
+
+                            <button type="submit" class="btn btn-primary">Upload File</button>
+                        </form>
+                        
+                        <!-- New processing status section -->
+                        <div id="processingStatus" class="processing-status mt-3">
+                            <h6>Real-Time File Processing Status</h6>
+                            <div class="step-indicator">
+                                <div class="step" id="step1">
+                                    1
+                                    <div class="step-label">Upload</div>
+                                </div>
+                                <div class="step-line" id="line1"></div>
+                                <div class="step" id="step2">
+                                    2
+                                    <div class="step-label">Processing</div>
+                                </div>
+                                <div class="step-line" id="line2"></div>
+                                <div class="step" id="step3">
+                                    3
+                                    <div class="step-label">Complete</div>
+                                </div>
+                            </div>
+                            <div class="progress mb-3">
+                                <div class="progress-bar" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
+                            </div>
+                            <div id="progressMessage" class="mb-2">Waiting for upload...</div>
+                            <div id="realTimeLog"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- New LAN file transfer section -->
+        <div class="row mb-4">
+            <div class="col">
+                <div class="card" id="lanSection">
+                    <div class="card-header">
+                        <h5>LAN File Transfer</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <button id="discoverPeers" class="btn btn-outline-primary mb-3">Discover Peers on LAN</button>
+                            <div id="peersList" class="mb-3">No peers found on the local network.</div>
+                        </div>
+                        <div id="transferStatus" class="mt-3" style="display: none;">
+                            <h6>Transfer Status</h6>
+                            <div class="progress mb-2">
+                                <div class="progress-bar" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
+                            </div>
+                            <div id="transferMessage">Waiting for transfer to start...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row mb-4">
+            <div class="col">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5>File List</h5>
+                        <button id="refreshFiles" class="btn btn-outline-secondary btn-sm">Refresh</button>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label for="listStorageType" class="form-label">Storage Provider</label>
+                            <select class="form-select" id="listStorageType">
+                                <option value="local" selected>Local Storage</option>
+                                <option value="s3">Amazon S3</option>
+                                <option value="google">Google Cloud Storage</option>
+                            </select>
+                        </div>
+
+                        <div id="s3ListConfig" class="provider-config">
+                            <h6>Amazon S3 Configuration</h6>
+                            <div class="mb-2">
+                                <label for="s3ListRegion" class="form-label">Region</label>
+                                <input type="text" class="form-control" id="s3ListRegion" placeholder="e.g., us-east-1">
+                            </div>
+                            <div class="mb-2">
+                                <label for="s3ListBucket" class="form-label">Bucket</label>
+                                <input type="text" class="form-control" id="s3ListBucket" placeholder="Your S3 bucket name">
+                            </div>
+                            <div class="mb-2">
+                                <label for="s3ListAccessKey" class="form-label">Access Key</label>
+                                <input type="text" class="form-control" id="s3ListAccessKey" placeholder="AWS access key">
+                            </div>
+                            <div class="mb-2">
+                                <label for="s3ListSecretKey" class="form-label">Secret Key</label>
+                                <input type="password" class="form-control" id="s3ListSecretKey" placeholder="AWS secret key">
+                            </div>
+                            <div class="mb-2">
+                                <label for="s3ListPrefix" class="form-label">Prefix (Optional)</label>
+                                <input type="text" class="form-control" id="s3ListPrefix" placeholder="e.g., folder/">
+                            </div>
+                        </div>
+
+                        <div id="googleListConfig" class="provider-config">
+                            <h6>Google Cloud Storage Configuration</h6>
+                            <div class="mb-2">
+                                <label for="gcsListBucket" class="form-label">Bucket</label>
+                                <input type="text" class="form-control" id="gcsListBucket" placeholder="Your GCS bucket name">
+                            </div>
+                            <div class="mb-2">
+                                <label for="gcsListCredFile" class="form-label">Credential File Path</label>
+                                <input type="text" class="form-control" id="gcsListCredFile" placeholder="Path to service account JSON file">
+                            </div>
+                            <div class="mb-2">
+                                <label for="gcsListPrefix" class="form-label">Prefix (Optional)</label>
+                                <input type="text" class="form-control" id="gcsListPrefix" placeholder="e.g., folder/">
+                            </div>
+                        </div>
+
+                        <div class="text-end mb-2">
+                            <button id="fetchFileList" class="btn btn-primary">List Files</button>
+                        </div>
+
+                        <table class="table table-striped table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Type</th>
+                                    <th>Size</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="fileList">
+                                <tr>
+                                    <td colspan="4" class="text-center">No files to display</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row mb-4">
+            <div class="col">
+                <div class="card" id="filePreview">
+                    <div class="card-header">
+                        <h5 id="previewTitle">File Preview</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="previewContent">
+                            <div class="mb-3">
+                                <h6>File Details</h6>
+                                <table class="table table-sm">
+                                    <tbody id="fileDetails"></tbody>
+                                </table>
+                            </div>
+
+                            <div class="mb-3" id="previewContainer">
+                                <h6>Preview</h6>
+                                <div class="preview-container" id="previewData"></div>
+                            </div>
+
+                            <div id="processedInfo">
+                                <h6>Processed Information</h6>
+                                <table class="table table-sm">
+                                    <tbody id="processedDetails"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // WebSocket connection for real-time updates
+        let ws;
+        let wsConnected = false;
+        let currentTaskId = null;
+        
+        function connectWebSocket() {
+            // Create WebSocket connection using the same host as the current page
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws`;
+            
+            ws = new WebSocket(wsUrl);
+            
+            ws.onopen = function() {
+                wsConnected = true;
+                console.log('WebSocket connection established');
+                addLogMessage('WebSocket connection established', 'info');
+            };
+            
+            ws.onmessage = function(event) {
+                const message = JSON.parse(event.data);
+                handleWebSocketMessage(message);
+            };
+            
+            ws.onclose = function() {
+                wsConnected = false;
+                console.log('WebSocket connection closed');
+                // Try to reconnect after a delay
+                setTimeout(connectWebSocket, 3000);
+            };
+            
+            ws.onerror = function(error) {
+                console.error('WebSocket error:', error);
+            };
+        }
+        
+        // Handle different types of WebSocket messages
+        function handleWebSocketMessage(message) {
+            console.log('Received WebSocket message:', message);
+            
+            switch (message.type) {
+                case 'connected':
+                    // Initial connection message
+                    break;
+                    
+                case 'processing_started':
+                    if (message.content && message.content.taskId) {
+                        currentTaskId = message.content.taskId;
+                        showProcessingStatus(true);
+                        updateProcessingStep(1);
+                        addLogMessage(`Processing started for ${message.content.file.name}`, 'info');
+                    }
+                    break;
+                    
+                case 'processing_progress':
+                    if (message.content) {
+                        updateProcessingProgress(message.content.progress);
+                        addLogMessage(`Processing at ${message.content.progress}%`, 'info');
+                    }
+                    break;
+                    
+                case 'processing_completed':
+                    if (message.content) {
+                        updateProcessingStep(3);
+                        updateProcessingProgress(100);
+                        addLogMessage(`Processing completed: ${message.content.summary}`, 'success');
+                        
+                        // Refresh file list to show the processed file
+                        fetchFiles();
+                    }
+                    break;
+                    
+                case 'processing_failed':
+                    if (message.content) {
+                        updateProcessingProgress(0);
+                        addLogMessage(`Processing failed: ${message.content.error}`, 'error');
+                    }
+                    break;
+                    
+                case 'transfer_initiated':
+                    addLogMessage(`File transfer initiated with ID: ${message.content.sessionID}`, 'info');
+                    break;
+                    
+                case 'transfer_status_changed':
+                    handleTransferStatusUpdate(message.content);
+                    break;
+                    
+                case 'transfer_progress':
+                    updateTransferProgress(message.content.progress);
+                    break;
+                    
+                case 'transfer_completed':
+                    addLogMessage(`Transfer completed!`, 'success');
+                    updateTransferProgress(100);
+                    break;
+            }
+        }
+
+        // Subscribe to updates for a specific task
+        function subscribeToTask(taskId) {
+            if (wsConnected && taskId) {
+                ws.send(JSON.stringify({
+                    type: 'subscribe',
+                    taskId: taskId
+                }));
+            }
+        }
+        
+        // Show or hide processing status section
+        function showProcessingStatus(show) {
+            const statusElement = document.getElementById('processingStatus');
+            statusElement.style.display = show ? 'block' : 'none';
+        }
+        
+        // Update the current processing step in the UI
+        function updateProcessingStep(step) {
+            // Reset all steps
+            for (let i = 1; i <= 3; i++) {
+                document.getElementById(`step${i}`).className = 'step';
+                if (i < 3) {
+                    document.getElementById(`line${i}`).className = 'step-line';
+                }
+            }
+            
+            // Mark current step and completed steps
+            for (let i = 1; i <= step; i++) {
+                document.getElementById(`step${i}`).className = i === step ? 'step active' : 'step completed';
+                if (i < step && i < 3) {
+                    document.getElementById(`line${i}`).className = 'step-line active';
+                }
+            }
+            
+            // Update progress message
+            const messages = [
+                "Waiting for upload...",
+                "File uploaded, processing in progress...",
+                "Processing in progress...",
+                "Processing completed!"
+            ];
+            
+            document.getElementById('progressMessage').textContent = messages[step] || messages[0];
+        }
+        
+        // Update progress bar
+        function updateProcessingProgress(progress) {
+            const progressBar = document.querySelector('#processingStatus .progress-bar');
+            progressBar.style.width = `${progress}%`;
+            progressBar.textContent = `${progress}%`;
+            progressBar.setAttribute('aria-valuenow', progress);
+        }
+        
+        // Update transfer progress 
+        function updateTransferProgress(progress) {
+            const progressBar = document.querySelector('#transferStatus .progress-bar');
+            progressBar.style.width = `${progress}%`;
+            progressBar.textContent = `${progress}%`;
+            progressBar.setAttribute('aria-valuenow', progress);
+            
+            if (progress === 100) {
+                document.getElementById('transferMessage').textContent = 'Transfer completed!';
+            } else {
+                document.getElementById('transferMessage').textContent = `Transferring... ${progress}%`;
+            }
+        }
+        
+        // Handle transfer status update
+        function handleTransferStatusUpdate(session) {
+            document.getElementById('transferStatus').style.display = 'block';
+            
+            switch (session.Status) {
+                case 'pending':
+                    document.getElementById('transferMessage').textContent = 'Waiting for receiver to accept...';
+                    updateTransferProgress(0);
+                    break;
+                case 'accepted':
+                    document.getElementById('transferMessage').textContent = 'Transfer accepted, preparing...';
+                    updateTransferProgress(10);
+                    break;
+                case 'rejected':
+                    document.getElementById('transferMessage').textContent = 'Transfer rejected!';
+                    break;
+                case 'transferring':
+                    document.getElementById('transferMessage').textContent = `Transferring... ${session.Progress}%`;
+                    updateTransferProgress(session.Progress);
+                    break;
+                case 'completed':
+                    document.getElementById('transferMessage').textContent = 'Transfer completed!';
+                    updateTransferProgress(100);
+                    break;
+                case 'failed':
+                    document.getElementById('transferMessage').textContent = `Transfer failed: ${session.Error}`;
+                    break;
+            }
+        }
+        
+        // Add a message to the real-time log
+        function addLogMessage(message, type = 'info') {
+            const logElement = document.getElementById('realTimeLog');
+            const timestamp = new Date().toLocaleTimeString();
+            const entry = document.createElement('div');
+            entry.className = `log-entry log-${type}`;
+            entry.innerHTML = `<span class="log-time">[${timestamp}]</span> ${message}`;
+            
+            logElement.appendChild(entry);
+            logElement.scrollTop = logElement.scrollHeight;
+        }
+        
+        // Fetch storage provider status
+        function fetchProviderStatus() {
+            fetch('/api/storage/status')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success && data.data) {
+                        displayProviderStatus(data.data);
+                    } else {
+                        console.error('Failed to fetch provider status:', data.error);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching provider status:', error);
+                });
+        }
+        
+        // Display storage provider status
+        function displayProviderStatus(providers) {
+            const statusList = document.getElementById('providerStatusList');
+            statusList.innerHTML = '';
+            
+            // Display status for each provider
+            for (const [provider, status] of Object.entries(providers)) {
+                const row = document.createElement('tr');
+                
+                // Provider name column
+                const nameCol = document.createElement('td');
+                let providerName = provider;
+                switch (provider) {
+                    case 'local': providerName = 'Local Storage'; break;
+                    case 's3': providerName = 'Amazon S3'; break;
+                    case 'google': providerName = 'Google Cloud Storage'; break;
+                }
+                nameCol.textContent = providerName;
+                
+                // Status column
+                const statusCol = document.createElement('td');
+                const statusBadge = document.createElement('span');
+                statusBadge.className = 'badge ' + (status.available ? 'bg-success' : 'bg-danger');
+                statusBadge.textContent = status.available ? 'Available' : 'Unavailable';
+                statusCol.appendChild(statusBadge);
+                
+                // Details column
+                const detailsCol = document.createElement('td');
+                if (!status.available && status.reason) {
+                    detailsCol.textContent = status.reason;
+                } else if (status.available) {
+                    detailsCol.textContent = 'Ready to use';
+                }
+                
+                row.appendChild(nameCol);
+                row.appendChild(statusCol);
+                row.appendChild(detailsCol);
+                statusList.appendChild(row);
+                
+                // Update UI elements for unavailable providers
+                if (!status.available) {
+                    disableUnavailableProvider(provider);
+                }
+            }
+        }
+        
+        // Disable UI elements for unavailable providers
+        function disableUnavailableProvider(provider) {
+            // Disable option in dropdown selectors
+            document.querySelectorAll('#storageType, #listStorageType').forEach(select => {
+                const option = select.querySelector(`option[value="${provider}"]`);
+                if (option) {
+                    option.disabled = true;
+                    option.textContent += ' (Unavailable)';
+                }
+            });
+        }
+        
+        document.addEventListener('DOMContentLoaded', function() {
+            // Fetch provider status when page loads
+            fetchProviderStatus();
+            
+            // Connect to WebSocket when page loads
+            connectWebSocket();
+            
+            // Show/hide storage provider config based on selection
+            document.getElementById('storageType').addEventListener('change', function() {
+                document.querySelectorAll('.provider-config').forEach(config => {
+                    config.style.display = 'none';
+                });
+                
+                if (this.value === 's3') {
+                    document.getElementById('s3Config').style.display = 'block';
+                } else if (this.value === 'google') {
+                    document.getElementById('googleConfig').style.display = 'block';
+                }
+            });
+
+            document.getElementById('listStorageType').addEventListener('change', function() {
+                document.querySelectorAll('#s3ListConfig, #googleListConfig').forEach(config => {
+                    config.style.display = 'none';
+                });
+                
+                if (this.value === 's3') {
+                    document.getElementById('s3ListConfig').style.display = 'block';
+                } else if (this.value === 'google') {
+                    document.getElementById('googleListConfig').style.display = 'block';
+                }
+            });
+
+            // Handle file upload
+            document.getElementById('uploadForm').addEventListener('submit', function(e) {
+                e.preventDefault();
+                
+                const fileInput = document.getElementById('fileInput');
+                if (!fileInput.files || fileInput.files.length === 0) {
+                    alert('Please select a file to upload');
+                    return;
+                }
+
+                // Show processing status section
+                showProcessingStatus(true);
+                updateProcessingStep(1);
+                updateProcessingProgress(0);
+                addLogMessage('Starting file upload...', 'info');
+
+                const file = fileInput.files[0];
+                const formData = new FormData();
+                formData.append('file', file);
+                
+                const storageType = document.getElementById('storageType').value;
+                formData.append('storageType', storageType);
+                formData.append('processFile', document.getElementById('processFile').checked);
+
+                // Add storage provider specific config
+                if (storageType === 's3') {
+                    formData.append('region', document.getElementById('s3Region').value);
+                    formData.append('bucket', document.getElementById('s3Bucket').value);
+                    formData.append('accessKey', document.getElementById('s3AccessKey').value);
+                    formData.append('secretKey', document.getElementById('s3SecretKey').value);
+                    formData.append('prefix', document.getElementById('s3Prefix').value);
+                } else if (storageType === 'google') {
+                    formData.append('bucket', document.getElementById('gcsBucket').value);
+                    formData.append('credentialFile', document.getElementById('gcsCredFile').value);
+                    formData.append('prefix', document.getElementById('gcsPrefix').value);
+                }
+
+                // Update UI to show upload progress
+                const xhr = new XMLHttpRequest();
+                xhr.open('POST', '/api/upload', true);
+                
+                // Track upload progress
+                xhr.upload.onprogress = function(e) {
+                    if (e.lengthComputable) {
+                        const percentComplete = Math.round((e.loaded / e.total) * 100);
+                        updateProcessingProgress(percentComplete);
+                        document.getElementById('progressMessage').textContent = `Uploading... ${percentComplete}%`;
+                    }
+                };
+                
+                xhr.onload = function() {
+                    if (xhr.status === 200) {
+                        // Upload completed successfully
+                        updateProcessingStep(2);
+                        addLogMessage('File uploaded successfully, processing...', 'success');
+                        
+                        const response = JSON.parse(xhr.responseText);
+                        if (response.success) {
+                            // If there's a task ID, subscribe to updates
+                            if (response.data && response.data.taskId) {
+                                currentTaskId = response.data.taskId;
+                                subscribeToTask(currentTaskId);
+                                
+                                // At this point, real-time updates will come through WebSocket
+                            } else if (response.data && response.data.summary) {
+                                // Processing already completed
+                                updateProcessingStep(3);
+                                updateProcessingProgress(100);
+                                addLogMessage(`Processing completed: ${response.data.summary}`, 'success');
+                                displayFilePreview(response.data);
+                            }
+                            
+                            // Refresh file list
+                            fetchFiles();
+                        } else {
+                            addLogMessage(`Upload failed: ${response.error}`, 'error');
+                        }
+                    } else {
+                        addLogMessage(`Upload failed with status: ${xhr.status}`, 'error');
+                    }
+                };
+                
+                xhr.onerror = function() {
+                    addLogMessage('Upload failed due to network error', 'error');
+                };
+                
+                xhr.send(formData);
+            });
+
+            // Handle file list refresh
+            document.getElementById('refreshFiles').addEventListener('click', fetchFiles);
+            document.getElementById('fetchFileList').addEventListener('click', fetchFiles);
+
+            function fetchFiles() {
+                const storageType = document.getElementById('listStorageType').value;
+                let url = `/api/list?storageType=${storageType}`;
+                
+                // Add storage provider specific config
+                if (storageType === 's3') {
+                    url += `&region=${document.getElementById('s3ListRegion').value}`;
+                    url += `&bucket=${document.getElementById('s3ListBucket').value}`;
+                    url += `&accessKey=${document.getElementById('s3ListAccessKey').value}`;
+                    url += `&secretKey=${document.getElementById('s3ListSecretKey').value}`;
+                    url += `&prefix=${document.getElementById('s3ListPrefix').value}`;
+                } else if (storageType === 'google') {
+                    url += `&bucket=${document.getElementById('gcsListBucket').value}`;
+                    url += `&credentialFile=${document.getElementById('gcsListCredFile').value}`;
+                    url += `&prefix=${document.getElementById('gcsListPrefix').value}`;
+                }
+
+                fetch(url)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success && data.data) {
+                        displayFiles(data.data);
+                    } else {
+                        alert(`Failed to fetch files: ${data.error}`);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('An error occurred while fetching files');
+                });
+            }
+
+            function displayFiles(files) {
+                const fileList = document.getElementById('fileList');
+                fileList.innerHTML = '';
+                
+                if (!files || files.length === 0) {
+                    fileList.innerHTML = '<tr><td colspan="4" class="text-center">No files found</td></tr>';
+                    return;
+                }
+
+                files.forEach(file => {
+                    const row = document.createElement('tr');
+                    row.classList.add('file-item');
+                    row.dataset.fileId = file.id;
+                    row.dataset.storageType = file.storageType;
+                    
+                    row.innerHTML = `
+                        <td>${file.name}</td>
+                        <td>${file.contentType}</td>
+                        <td>${formatFileSize(file.size)}</td>
+                        <td>
+                            <div class="btn-group btn-group-sm" role="group">
+                                <button class="btn btn-outline-primary download-btn">Download</button>
+                                <button class="btn btn-outline-danger delete-btn">Delete</button>
+                            </div>
+                        </td>
+                    `;
+                    
+                    fileList.appendChild(row);
+                });
+
+                // Add event listeners to buttons
+                document.querySelectorAll('.download-btn').forEach(btn => {
+                    btn.addEventListener('click', function(e) {
+                        e.stopPropagation();
+                        const row = this.closest('tr');
+                        const fileId = row.dataset.fileId;
+                        const storageType = row.dataset.storageType;
+                        
+                        // Create download link
+                        const downloadUrl = `/api/download?id=${fileId}&storageType=${storageType}`;
+                        const a = document.createElement('a');
+                        a.href = downloadUrl;
+                        a.target = '_blank';
+                        a.click();
+                    });
+                });
+
+                document.querySelectorAll('.delete-btn').forEach(btn => {
+                    btn.addEventListener('click', function(e) {
+                        e.stopPropagation();
+                        if (!confirm('Are you sure you want to delete this file?')) {
+                            return;
+                        }
+                        
+                        const row = this.closest('tr');
+                        const fileId = row.dataset.fileId;
+                        const storageType = row.dataset.storageType;
+                        
+                        fetch(`/api/delete?id=${fileId}&storageType=${storageType}`, {
+                            method: 'DELETE'
+                        })
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.success) {
+                                alert('File deleted successfully!');
+                                row.remove();
+                                if (fileList.childElementCount === 0) {
+                                    fileList.innerHTML = '<tr><td colspan="4" class="text-center">No files found</td></tr>';
+                                }
+                            } else {
+                                alert(`Failed to delete file: ${data.error}`);
+                            }
+                        })
+                        .catch(error => {
+                            console.error('Error:', error);
+                            alert('An error occurred while deleting the file');
+                        });
+                    });
+                });
+
+                // Add click event to show file preview
+                document.querySelectorAll('.file-item').forEach(row => {
+                    row.addEventListener('click', function() {
+                        const fileId = this.dataset.fileId;
+                        const storageType = this.dataset.storageType;
+                        
+                        fetch(`/api/download?id=${fileId}&storageType=${storageType}`)
+                        .then(response => {
+                            if (!response.ok) {
+                                throw new Error('Failed to fetch file');
+                            }
+                            
+                            const contentType = response.headers.get('content-type');
+                            const fileName = response.headers.get('content-disposition')
+                                ? response.headers.get('content-disposition').split('filename=')[1]
+                                : 'Unknown';
+                            
+                            return Promise.all([
+                                response.blob(),
+                                fetch(`/api/url?id=${fileId}&storageType=${storageType}`)
+                            ]);
+                        })
+                        .then(([blob, urlResponse]) => {
+                            const file = {
+                                id: fileId,
+                                name: this.cells[0].textContent,
+                                contentType: this.cells[1].textContent,
+                                size: this.cells[2].textContent,
+                                blob: blob,
+                                storageType: storageType
+                            };
+                            
+                            return Promise.all([file, urlResponse.json()]);
+                        })
+                        .then(([file, urlData]) => {
+                            if (urlData.success) {
+                                file.previewUrl = urlData.data.url;
+                            }
+                            displayFilePreview(file);
+                        })
+                        .catch(error => {
+                            console.error('Error:', error);
+                            alert('An error occurred while fetching file details');
+                        });
+                    });
+                });
+            }
+
+            function formatFileSize(bytes) {
+                if (bytes < 1024) return bytes + ' B';
+                else if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+                else if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB';
+                else return (bytes / 1073741824).toFixed(1) + ' GB';
+            }
+
+            function displayFilePreview(file) {
+                document.getElementById('filePreview').style.display = 'block';
+                document.getElementById('previewTitle').textContent = 'File Preview: ' + file.name;
+                
+                // Display file details
+                const fileDetails = document.getElementById('fileDetails');
+                fileDetails.innerHTML = `
+                    <tr><th>Name</th><td>${file.name}</td></tr>
+                    <tr><th>Type</th><td>${file.contentType}</td></tr>
+                    <tr><th>Size</th><td>${file.size}</td></tr>
+                    <tr><th>Storage</th><td>${file.storageType}</td></tr>
+                `;
+                
+                // Display file preview
+                const previewData = document.getElementById('previewData');
+                previewData.innerHTML = '';
+                
+                if (file.blob) {
+                    // For image files
+                    if (file.contentType.startsWith('image/')) {
+                        const img = document.createElement('img');
+                        img.className = 'preview-image';
+                        img.src = URL.createObjectURL(file.blob);
+                        previewData.appendChild(img);
+                    } 
+                    // For text files
+                    else if (file.contentType.startsWith('text/') || 
+                             file.contentType.includes('json') || 
+                             file.contentType.includes('csv')) {
+                        const reader = new FileReader();
+                        reader.onload = function(e) {
+                            const pre = document.createElement('pre');
+                            pre.textContent = e.target.result;
+                            previewData.appendChild(pre);
+                        };
+                        reader.readAsText(file.blob);
+                    }
+                    // For PDF files 
+                    else if (file.contentType === 'application/pdf') {
+                        const embed = document.createElement('embed');
+                        embed.src = URL.createObjectURL(file.blob);
+                        embed.width = '100%';
+                        embed.height = '300px';
+                        embed.type = 'application/pdf';
+                        previewData.appendChild(embed);
+                    }
+                    // Default fallback
+                    else {
+                        previewData.innerHTML = 'Preview not available for this file type.';
+                    }
+                } else if (file.previewUrl) {
+                    previewData.innerHTML = `<a href="${file.previewUrl}" target="_blank">View file in new tab</a>`;
+                } else {
+                    previewData.innerHTML = 'No preview available';
+                }
+                
+                // Display processed information if available
+                const processedInfo = document.getElementById('processedInfo');
+                const processedDetails = document.getElementById('processedDetails');
+                
+                if (file.summary) {
+                    processedInfo.style.display = 'block';
+                    let detailsHtml = `
+                        <tr><th>Summary</th><td>${file.summary}</td></tr>
+                    `;
+                    
+                    if (file.processStats) {
+                        for (const [key, value] of Object.entries(file.processStats)) {
+                            detailsHtml += `<tr><th>${key}</th><td>${value}</td></tr>`;
+                        }
+                    }
+                    
+                    processedDetails.innerHTML = detailsHtml;
+                } else {
+                    processedInfo.style.display = 'none';
+                }
+            }
+
+            // Handle LAN peer discovery
+            document.getElementById('discoverPeers').addEventListener('click', function() {
+                fetch('/api/lan/discover')
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success && data.data && data.data.length > 0) {
+                            let peersList = '<ul class="list-group">';
+                            data.data.forEach(peer => {
+                                peersList += `
+                                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                                        ${peer.name} (${peer.ip})
+                                        <button class="btn btn-sm btn-primary transfer-btn" 
+                                                data-peer-id="${peer.peerId}"
+                                                data-peer-name="${peer.name}">
+                                            Send Files
+                                        </button>
+                                    </li>
+                                `;
+                            });
+                            peersList += '</ul>';
+                            document.getElementById('peersList').innerHTML = peersList;
+                            
+                            // Add event listeners to transfer buttons
+                            document.querySelectorAll('.transfer-btn').forEach(btn => {
+                                btn.addEventListener('click', function() {
+                                    initiateTransfer(this.dataset.peerId, this.dataset.peerName);
+                                });
+                            });
+                        } else {
+                            document.getElementById('peersList').textContent = 'No peers found on the local network.';
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error discovering peers:', error);
+                        document.getElementById('peersList').textContent = 'Error discovering peers.';
+                    });
+            });
+            
+            // Function to initiate a file transfer to a peer
+            function initiateTransfer(peerId, peerName) {
+                // Get selected files from file list
+                const selectedFiles = getSelectedFiles();
+                if (selectedFiles.length === 0) {
+                    alert('Please select at least one file to transfer');
+                    return;
+                }
+                
+                const myId = 'user-' + Math.random().toString(36).substring(2, 10);
+                
+                fetch('/api/lan/initiate', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        senderId: myId,
+                        receiverId: peerId,
+                        files: selectedFiles
+                    })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        document.getElementById('transferStatus').style.display = 'block';
+                        document.getElementById('transferMessage').textContent = 
+                            `Transfer initiated to ${peerName}, waiting for acceptance...`;
+                            
+                        // Subscribe to updates for this transfer
+                        if (data.data && data.data.SessionID) {
+                            subscribeToTask(data.data.SessionID);
+                        }
+                        
+                        addLogMessage(`Initiated transfer to ${peerName}`, 'info');
+                    } else {
+                        alert(`Failed to initiate transfer: ${data.error}`);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error initiating transfer:', error);
+                    alert('Error initiating transfer');
+                });
+            }
+            
+            // Get selected files from the file list
+            function getSelectedFiles() {
+                const selectedFiles = [];
+                document.querySelectorAll('.file-item.selected').forEach(row => {
+                    selectedFiles.push({
+                        id: row.dataset.fileId,
+                        name: row.cells[0].textContent,
+                        contentType: row.cells[1].textContent,
+                        size: parseFileSize(row.cells[2].textContent),
+                        storageType: row.dataset.storageType
+                    });
+                });
+                return selectedFiles;
+            }
+            
+            // Parse file size string back to bytes
+            function parseFileSize(sizeStr) {
+                const units = {
+                    'B': 1,
+                    'KB': 1024,
+                    'MB': 1024 * 1024,
+                    'GB': 1024 * 1024 * 1024
+                };
+                
+                const parts = sizeStr.trim().split(' ');
+                if (parts.length !== 2) return 0;
+                
+                const value = parseFloat(parts[0]);
+                const unit = parts[1];
+                
+                return Math.floor(value * (units[unit] || 1));
+            }
+            
+            // Make rows in the file list selectable
+            document.addEventListener('click', function(e) {
+                if (e.target.closest('.file-item') && !e.target.closest('.btn')) {
+                    const row = e.target.closest('.file-item');
+                    row.classList.toggle('selected');
+                    if (row.classList.contains('selected')) {
+                        row.style.backgroundColor = '#e2f0ff';
+                    } else {
+                        row.style.backgroundColor = '';
+                    }
+                }
+            });
+        });
+    </script>
+</body>
+</html>
