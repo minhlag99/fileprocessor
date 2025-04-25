@@ -1,116 +1,94 @@
 @echo off
-:: Script to deploy Go File Processor to a VPS
-:: You'll need to have pscp.exe (PuTTY SCP) or scp installed
+REM Improved deployment script for fileprocessor to Ubuntu VPS from Windows
 
-echo ======================================
-echo Go File Processor - VPS Deployment Tool
-echo ======================================
+REM Configuration - change these variables
+set VPS_USER=ubuntu
+set VPS_HOST=your-vps-ip-address
+set DEPLOY_DIR=/opt/fileprocessor
+set APP_PORT=8080
+set SSH_KEY_PATH=%USERPROFILE%\.ssh\id_rsa
+set SSH_OPTIONS=-i "%SSH_KEY_PATH%" -o StrictHostKeyChecking=no
 
-:: Get VPS connection details from the user
-set /p VPS_IP="Enter VPS IP address: "
-set /p VPS_USER="Enter VPS username (default: root): " || set VPS_USER=root
-set /p SSH_PORT="Enter SSH port (default: 22): " || set SSH_PORT=22
-set /p SSH_KEY="Enter path to SSH private key (leave empty for password authentication): "
-
-echo.
-echo Creating deployment package...
-
-:: Create a temporary directory for the deployment files
-if not exist ".\deploy_temp" mkdir ".\deploy_temp"
-
-:: Copy necessary files to the deployment directory
-echo Copying files...
-xcopy ".\cmd" ".\deploy_temp\cmd\" /E /I /Y
-xcopy ".\config" ".\deploy_temp\config\" /E /I /Y
-xcopy ".\internal" ".\deploy_temp\internal\" /E /I /Y
-xcopy ".\ui" ".\deploy_temp\ui\" /E /I /Y
-copy ".\go.mod" ".\deploy_temp\"
-copy ".\go.sum" ".\deploy_temp\"
-copy ".\fileprocessor.ini" ".\deploy_temp\" 2>nul
-copy ".\deploy.sh" ".\deploy_temp\"
-
-:: Make sure the deploy.sh script is using Unix line endings
-powershell -Command "(Get-Content .\deploy_temp\deploy.sh) -replace \"`r`n\", \"`n\" | Set-Content -NoNewline .\deploy_temp\deploy.sh"
-
-echo.
-echo Compressing files...
-powershell -Command "Compress-Archive -Path .\deploy_temp\* -DestinationPath .\deploy_package.zip -Force"
-
-echo.
-echo Transferring files to VPS...
-
-:: Use pscp (PuTTY SCP) if available, otherwise try scp
-where pscp >nul 2>nul
-if %ERRORLEVEL% EQU 0 (
-    if not "%SSH_KEY%"=="" (
-        pscp -P %SSH_PORT% -i "%SSH_KEY%" ".\deploy_package.zip" "%VPS_USER%@%VPS_IP%:~/"
-    ) else (
-        pscp -P %SSH_PORT% ".\deploy_package.zip" "%VPS_USER%@%VPS_IP%:~/"
-    )
-) else (
-    where scp >nul 2>nul
-    if %ERRORLEVEL% EQU 0 (
-        if not "%SSH_KEY%"=="" (
-            scp -P %SSH_PORT% -i "%SSH_KEY%" ".\deploy_package.zip" "%VPS_USER%@%VPS_IP%:~/"
-        ) else (
-            scp -P %SSH_PORT% ".\deploy_package.zip" "%VPS_USER%@%VPS_IP%:~/"
-        )
-    ) else (
-        echo ERROR: Neither pscp nor scp was found. Please install PuTTY or openssh.
-        goto cleanup
-    )
-)
-
+REM Check if Go is installed
+where go >nul 2>&1
 if %ERRORLEVEL% NEQ 0 (
-    echo ERROR: Failed to transfer files to VPS.
-    goto cleanup
+    echo Error: Go is required but not installed
+    exit /b 1
 )
 
-echo.
-echo Deploying application on VPS...
-
-:: Run the deployment script on the VPS
-where plink >nul 2>nul
-if %ERRORLEVEL% EQU 0 (
-    if not "%SSH_KEY%"=="" (
-        echo | plink -P %SSH_PORT% -i "%SSH_KEY%" %VPS_USER%@%VPS_IP% "unzip -o ~/deploy_package.zip -d ~/fileprocessor && cd ~/fileprocessor && chmod +x deploy.sh && ./deploy.sh"
-    ) else (
-        echo | plink -P %SSH_PORT% %VPS_USER%@%VPS_IP% "unzip -o ~/deploy_package.zip -d ~/fileprocessor && cd ~/fileprocessor && chmod +x deploy.sh && ./deploy.sh"
-    )
-) else (
-    where ssh >nul 2>nul
-    if %ERRORLEVEL% EQU 0 (
-        if not "%SSH_KEY%"=="" (
-            ssh -p %SSH_PORT% -i "%SSH_KEY%" %VPS_USER%@%VPS_IP% "unzip -o ~/deploy_package.zip -d ~/fileprocessor && cd ~/fileprocessor && chmod +x deploy.sh && ./deploy.sh"
-        ) else (
-            ssh -p %SSH_PORT% %VPS_USER%@%VPS_IP% "unzip -o ~/deploy_package.zip -d ~/fileprocessor && cd ~/fileprocessor && chmod +x deploy.sh && ./deploy.sh"
-        )
-    ) else (
-        echo ERROR: Neither plink nor ssh was found. Please install PuTTY or openssh.
-        goto cleanup
-    )
-)
-
+REM Check if SSH/SCP are available
+where ssh >nul 2>&1
 if %ERRORLEVEL% NEQ 0 (
-    echo ERROR: Failed to deploy application on VPS.
-    goto cleanup
+    echo Error: SSH is required but not installed. Install Git Bash or OpenSSH.
+    exit /b 1
 )
 
-echo.
-echo ======================================
-echo Deployment completed successfully!
-echo.
-echo Your application should now be running on your VPS at http://%VPS_IP%:8080
-echo If Nginx was set up correctly, it should also be accessible at http://%VPS_IP%/
-echo.
-echo Remember to configure SSL/TLS for secure connections if needed.
-echo ======================================
+echo Building application for Linux...
+set GOOS=linux
+set GOARCH=amd64
+go build -o fileprocessor ./cmd/server
 
-:cleanup
-:: Clean up temporary files
-echo.
-echo Cleaning up temporary files...
-rmdir /S /Q ".\deploy_temp" 2>nul
-echo Done.
+REM Create config file if it doesn't exist
+if not exist fileprocessor.ini (
+    echo Creating default config file...
+    (
+        echo {
+        echo     "server": {
+        echo         "port": %APP_PORT%,
+        echo         "uiDir": "./ui",
+        echo         "uploadsDir": "./uploads",
+        echo         "host": "0.0.0.0",
+        echo         "shutdownTimeout": 30
+        echo     },
+        echo     "storage": {
+        echo         "defaultProvider": "local",
+        echo         "local": {
+        echo             "basePath": "./uploads"
+        echo         }
+        echo     },
+        echo     "workers": {
+        echo         "count": 4,
+        echo         "queueSize": 100,
+        echo         "maxAttempts": 3
+        echo     },
+        echo     "features": {
+        echo         "enableLAN": true,
+        echo         "enableProcessing": true,
+        echo         "enableCloudStorage": true,
+        echo         "enableProgressUpdates": true
+        echo     }
+        echo }
+    ) > fileprocessor.ini
+)
 
-pause
+echo Creating deployment directory on VPS...
+ssh %SSH_OPTIONS% %VPS_USER%@%VPS_HOST% "sudo mkdir -p %DEPLOY_DIR% && sudo chown %VPS_USER%:%VPS_USER% %DEPLOY_DIR% && mkdir -p %DEPLOY_DIR%/ui %DEPLOY_DIR%/uploads"
+
+echo Copying application files to VPS...
+scp %SSH_OPTIONS% fileprocessor fileprocessor.ini %VPS_USER%@%VPS_HOST%:%DEPLOY_DIR%/
+scp %SSH_OPTIONS% -r ui/* %VPS_USER%@%VPS_HOST%:%DEPLOY_DIR%/ui/
+
+echo Copying systemd service file and network configuration scripts...
+scp %SSH_OPTIONS% deploy/fileprocessor.service deploy/network_setup.sh %VPS_USER%@%VPS_HOST%:/tmp/
+ssh %SSH_OPTIONS% %VPS_USER%@%VPS_HOST% "sudo mv /tmp/fileprocessor.service /etc/systemd/system/ && sudo mv /tmp/network_setup.sh %DEPLOY_DIR%/ && sudo chmod +x %DEPLOY_DIR%/network_setup.sh"
+
+echo Setting up firewall on VPS...
+ssh %SSH_OPTIONS% %VPS_USER%@%VPS_HOST% "sudo -S ufw allow %APP_PORT%/tcp && sudo ufw status"
+
+echo Configuring and starting service...
+ssh %SSH_OPTIONS% %VPS_USER%@%VPS_HOST% "sudo systemctl daemon-reload && sudo systemctl enable fileprocessor.service && sudo systemctl restart fileprocessor.service"
+
+echo Checking service status...
+ssh %SSH_OPTIONS% %VPS_USER%@%VPS_HOST% "sudo systemctl status fileprocessor.service"
+
+echo Running network configuration checks...
+ssh %SSH_OPTIONS% %VPS_USER%@%VPS_HOST% "sudo %DEPLOY_DIR%/network_setup.sh"
+
+echo Verifying service accessibility...
+ssh %SSH_OPTIONS% %VPS_USER%@%VPS_HOST% "curl -s http://localhost:%APP_PORT%/health || echo 'Service not accessible locally'"
+
+echo Deployment complete!
+echo Your application should now be accessible at http://%VPS_HOST%:%APP_PORT%
+echo.
+echo Press any key to continue...
+pause > nul

@@ -1,4 +1,4 @@
-module go-fileprocessor
+module fileprocessor
 
 go 1.24.2
 

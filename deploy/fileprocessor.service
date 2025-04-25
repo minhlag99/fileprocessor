@@ -1,0 +1,22 @@
+[Unit]
+Description=File Processor Service
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/fileprocessor
+ExecStart=/opt/fileprocessor/fileprocessor -config=/opt/fileprocessor/fileprocessor.ini
+Restart=on-failure
+RestartSec=5
+Environment=FP_HOST=0.0.0.0
+Environment=FP_PORT=8080
+Environment=FP_UPLOADS_DIR=/opt/fileprocessor/uploads
+
+# Hardening options
+PrivateTmp=true
+ProtectSystem=full
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
