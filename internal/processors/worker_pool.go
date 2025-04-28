@@ -3,137 +3,184 @@ package processors
 
 import (
 	"context"
+	"log"
 	"sync"
+	"time"
 )
 
 // Task represents a processing task
 type Task struct {
-	ID         string                 // Unique identifier for the task
-	ProcessorFn func() (*ProcessResult, error) // Function to execute
-	Result      chan *ProcessResult    // Channel to receive the result
-	Error       chan error             // Channel to receive errors
-	Progress    chan int               // Channel to report progress (0-100)
-	ctx         context.Context        // Context for cancellation
-	cancel      context.CancelFunc     // Function to cancel the task
+	ID         string                           // Unique ID for the task
+	Process    func() (*ProcessResult, error)   // Function to execute
+	Result     chan *ProcessResult              // Channel to receive the result
+	Error      chan error                       // Channel to receive errors
+	Status     string                           // Status of the task
+	UpdateChan chan map[string]interface{}      // Channel for progress updates
+	Timestamp  time.Time                        // When the task was created
 }
 
-// NewTask creates a new processing task
-func NewTask(id string, fn func() (*ProcessResult, error)) *Task {
-	ctx, cancel := context.WithCancel(context.Background())
+// NewTask creates a new task with the given ID and process function
+func NewTask(id string, process func() (*ProcessResult, error)) *Task {
 	return &Task{
 		ID:         id,
-		ProcessorFn: fn,
+		Process:    process,
 		Result:     make(chan *ProcessResult, 1),
 		Error:      make(chan error, 1),
-		Progress:   make(chan int, 10), // Buffer for progress updates
-		ctx:        ctx,
-		cancel:     cancel,
+		Status:     "queued",
+		UpdateChan: make(chan map[string]interface{}, 10),
+		Timestamp:  time.Now(),
 	}
 }
 
-// Cancel cancels the task
-func (t *Task) Cancel() {
-	if t.cancel != nil {
-		t.cancel()
-	}
-}
-
-// WorkerPool manages a pool of worker goroutines for concurrent file processing
+// WorkerPool manages a pool of worker goroutines
 type WorkerPool struct {
-	tasks      chan *Task
-	results    map[string]*Task
-	numWorkers int
-	wg         sync.WaitGroup
-	mu         sync.RWMutex
-	quit       chan struct{}
+	tasks       chan *Task
+	workers     int
+	maxAttempts int
+	wg          sync.WaitGroup
+	quit        chan struct{}
+	active      map[string]*Task
+	mu          sync.RWMutex
 }
 
-// NewWorkerPool creates a new worker pool with the specified number of workers
-func NewWorkerPool(numWorkers int) *WorkerPool {
-	if numWorkers <= 0 {
-		numWorkers = 5 // Default to 5 workers
-	}
+// DefaultPool is the default worker pool used by the application
+var DefaultPool *WorkerPool
 
+// InitializeWorkerPool creates and starts the default worker pool
+func InitializeWorkerPool(workers, queueSize int) {
+	DefaultPool = NewWorkerPool(workers, queueSize, 3)
+}
+
+// ShutdownWorkerPool shuts down the default worker pool
+func ShutdownWorkerPool() {
+	if DefaultPool != nil {
+		DefaultPool.Stop()
+	}
+}
+
+// NewWorkerPool creates a new worker pool
+func NewWorkerPool(workers, queueSize, maxAttempts int) *WorkerPool {
+	if workers <= 0 {
+		workers = 1
+	}
+	if queueSize <= 0 {
+		queueSize = 10
+	}
+	if maxAttempts <= 0 {
+		maxAttempts = 1
+	}
+	
 	pool := &WorkerPool{
-		tasks:      make(chan *Task, 100), // Buffer for pending tasks
-		results:    make(map[string]*Task),
-		numWorkers: numWorkers,
-		quit:       make(chan struct{}),
+		tasks:       make(chan *Task, queueSize),
+		workers:     workers,
+		maxAttempts: maxAttempts,
+		quit:        make(chan struct{}),
+		active:      make(map[string]*Task),
 	}
-
-	// Start the workers
 	pool.Start()
-
 	return pool
 }
 
 // Start starts the worker pool
 func (p *WorkerPool) Start() {
-	for i := 0; i < p.numWorkers; i++ {
-		p.wg.Add(1)
+	p.wg.Add(p.workers)
+	for i := 0; i < p.workers; i++ {
 		go p.worker(i)
 	}
+	log.Printf("Started worker pool with %d workers", p.workers)
 }
 
 // Stop stops the worker pool
 func (p *WorkerPool) Stop() {
 	close(p.quit)
 	p.wg.Wait()
+	log.Println("Worker pool stopped")
 }
 
-// Submit submits a task to the worker pool
-func (p *WorkerPool) Submit(task *Task) {
+// Submit adds a task to the pool
+func (p *WorkerPool) Submit(task *Task) error {
+	// Register the task
 	p.mu.Lock()
-	p.results[task.ID] = task
+	p.active[task.ID] = task
 	p.mu.Unlock()
-
-	// Send to workers
-	p.tasks <- task
+	
+	// Submit to the queue
+	select {
+	case p.tasks <- task:
+		return nil
+	default:
+		// Queue is full
+		p.mu.Lock()
+		delete(p.active, task.ID)
+		p.mu.Unlock()
+		return ErrQueueFull
+	}
 }
 
 // GetTask gets a task by ID
-func (p *WorkerPool) GetTask(id string) *Task {
+func (p *WorkerPool) GetTask(id string) (*Task, bool) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	return p.results[id]
+	task, ok := p.active[id]
+	return task, ok
+}
+
+// CancelTask cancels a task by ID
+func (p *WorkerPool) CancelTask(id string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	_, ok := p.active[id]
+	if ok {
+		delete(p.active, id)
+	}
+	return ok
+}
+
+// ActiveTasks returns the number of active tasks
+func (p *WorkerPool) ActiveTasks() int {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return len(p.active)
 }
 
 // worker processes tasks from the queue
 func (p *WorkerPool) worker(id int) {
 	defer p.wg.Done()
-
+	
+	log.Printf("Worker %d started", id)
+	
 	for {
 		select {
-		case <-p.quit:
-			return
 		case task := <-p.tasks:
-			// Execute the task
-			select {
-			case <-task.ctx.Done():
-				// Task was cancelled
-				task.Error <- context.Canceled
-			default:
-				// Process the task
-				result, err := task.ProcessorFn()
-				if err != nil {
-					task.Error <- err
-				} else {
-					task.Result <- result
-				}
+			log.Printf("Worker %d processing task %s", id, task.ID)
+			
+			// Process the task
+			result, err := task.Process()
+			
+			// Update status
+			p.mu.Lock()
+			delete(p.active, task.ID)
+			p.mu.Unlock()
+			
+			// Send result or error
+			if err != nil {
+				log.Printf("Worker %d failed task %s: %v", id, task.ID, err)
+				task.Error <- err
+			} else {
+				log.Printf("Worker %d completed task %s", id, task.ID)
+				task.Result <- result
 			}
+		case <-p.quit:
+			log.Printf("Worker %d stopping", id)
+			return
 		}
 	}
 }
 
-// DefaultPool is the default worker pool
-var DefaultPool = NewWorkerPool(10)
-
 // Submit submits a task to the default worker pool
-func Submit(task *Task) {
-	DefaultPool.Submit(task)
-}
-
-// GetTask gets a task from the default worker pool
-func GetTask(id string) *Task {
-	return DefaultPool.GetTask(id)
+func Submit(task *Task) error {
+	if DefaultPool == nil {
+		return ErrNoWorkerPool
+	}
+	return DefaultPool.Submit(task)
 }

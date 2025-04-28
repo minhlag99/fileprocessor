@@ -10,51 +10,41 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 	"syscall"
 	"time"
 
-	"go-fileprocessor/internal/handlers"
-	"go-fileprocessor/internal/processors"
+	"fileprocessor/internal/config"
+	"fileprocessor/internal/handlers"
+	"fileprocessor/internal/middleware"
+	"fileprocessor/internal/processors"
 )
 
 var (
-	port            = flag.Int("port", 8080, "Server port")
-	uiDir           = flag.String("ui", "./ui", "UI directory")
-	uploads         = flag.String("uploads", "./uploads", "Upload directory")
-	certFile        = flag.String("cert", "", "TLS certificate file (optional)")
-	keyFile         = flag.String("key", "", "TLS key file (optional)")
-	workerCount     = flag.Int("workers", runtime.NumCPU(), "Number of worker threads for file processing")
-	enableLAN       = flag.Bool("enable-lan", true, "Enable LAN file transfer capabilities")
-	shutdownTimeout = flag.Int("shutdown-timeout", 30, "Graceful shutdown timeout in seconds")
-	version         = "1.0.0"  // Version number for the application
+	configFile = flag.String("config", "fileprocessor.ini", "Configuration file path")
+	version    = "1.2.0"  // Version number for the application
 )
 
 func main() {
 	// Parse command line flags
 	flag.Parse()
 
+	// Load application configuration
+	if err := config.LoadConfig(*configFile); err != nil {
+		log.Fatalf("Failed to load configuration: %v", err)
+	}
+
 	// Print banner and version
 	fmt.Printf("\n=================================\n")
 	fmt.Printf("File Management System v%s\n", version)
 	fmt.Printf("=================================\n\n")
-	fmt.Printf("Server starting with %d worker threads\n", *workerCount)
-	if *enableLAN {
+	fmt.Printf("Server starting with %d worker threads\n", config.AppConfig.Workers.Count)
+	if config.AppConfig.Features.EnableLAN {
 		fmt.Printf("LAN file transfer capabilities enabled\n")
 	}
-
-	// Create directories if they don't exist
-	for _, dir := range []string{*uploads, *uiDir} {
-		if _, err := os.Stat(dir); os.IsNotExist(err) {
-			if err := os.MkdirAll(dir, 0755); err != nil {
-				log.Fatalf("Failed to create directory %s: %v", dir, err)
-			}
-		}
-	}
-
-	// Initialize worker pool with specified number of workers
-	log.Printf("Initializing worker pool with %d workers", *workerCount)
-	processors.DefaultPool = processors.NewWorkerPool(*workerCount)
+	
+	// Initialize worker pool with configured number of workers
+	log.Printf("Initializing worker pool with %d workers", config.AppConfig.Workers.Count)
+	processors.InitializeWorkerPool(config.AppConfig.Workers.Count, config.AppConfig.Workers.QueueSize)
 
 	// Initialize file handler
 	fileHandler, err := handlers.NewFileHandler()
@@ -64,7 +54,7 @@ func main() {
 
 	// Initialize LAN transfer handler if enabled
 	var lanHandler *handlers.LANTransferHandler
-	if *enableLAN {
+	if config.AppConfig.Features.EnableLAN {
 		log.Println("Initializing LAN file transfer capabilities")
 		lanHandler, err = handlers.NewLANTransferHandler()
 		if err != nil {
@@ -79,8 +69,16 @@ func main() {
 		}
 	}
 
-	// Create router and register handlers
+	// Create router with middleware
 	mux := http.NewServeMux()
+	
+	// Add middleware
+	handler := middleware.Chain(
+		mux,
+		middleware.Logger(),
+		middleware.Recover(),
+		middleware.CORS(config.AppConfig.Server.AllowedOrigins),
+	)
 
 	// File API routes
 	mux.HandleFunc("/api/upload", fileHandler.UploadFile)
@@ -93,6 +91,12 @@ func main() {
 	// WebSocket endpoint for real-time updates
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		handlers.ServeWs(handlers.DefaultWebSocketHub, w, r)
+	})
+
+	// Health check endpoint
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
 	})
 
 	// LAN transfer routes if enabled
@@ -108,17 +112,17 @@ func main() {
 		// For demonstration purposes, we'll serve the workflow HTML page 
 		// which animates the workflow process
 		w.Header().Set("Content-Type", "text/html")
-		http.ServeFile(w, r, filepath.Join(*uiDir, "images/workflow.html"))
+		http.ServeFile(w, r, filepath.Join(config.AppConfig.Server.UIDir, "images/workflow.html"))
 	})
 
 	// Serve static UI files
-	mux.Handle("/", http.FileServer(http.Dir(*uiDir)))
+	mux.Handle("/", http.FileServer(http.Dir(config.AppConfig.Server.UIDir)))
 
 	// Create HTTP server
-	addr := fmt.Sprintf(":%d", *port)
+	addr := config.GetAddressString()
 	server := &http.Server{
 		Addr:    addr,
-		Handler: mux,
+		Handler: handler,
 	}
 
 	// Channel to listen for interrupt signals
@@ -130,10 +134,14 @@ func main() {
 		log.Printf("Starting server on %s", addr)
 
 		var err error
-		if *certFile != "" && *keyFile != "" {
+		if config.AppConfig.Server.CertFile != "" && config.AppConfig.Server.KeyFile != "" {
 			// HTTPS server
-			log.Printf("Using TLS with cert file %s and key file %s", *certFile, *keyFile)
-			err = server.ListenAndServeTLS(*certFile, *keyFile)
+			log.Printf("Using TLS with cert file %s and key file %s", 
+				config.AppConfig.Server.CertFile, 
+				config.AppConfig.Server.KeyFile)
+			err = server.ListenAndServeTLS(
+				config.AppConfig.Server.CertFile, 
+				config.AppConfig.Server.KeyFile)
 		} else {
 			// HTTP server
 			err = server.ListenAndServe()
@@ -149,7 +157,9 @@ func main() {
 	log.Println("Shutting down server...")
 
 	// Create context with timeout for graceful shutdown
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(*shutdownTimeout)*time.Second)
+	ctx, cancel := context.WithTimeout(
+		context.Background(), 
+		time.Duration(config.AppConfig.Server.ShutdownTimeout)*time.Second)
 	defer cancel()
 
 	// Shutdown the server gracefully
@@ -158,7 +168,7 @@ func main() {
 	}
 
 	// Stop the worker pool
-	processors.DefaultPool.Stop()
+	processors.ShutdownWorkerPool()
 	log.Println("Worker pool stopped")
 
 	// Stop LAN transfer service if it was enabled

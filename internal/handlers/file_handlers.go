@@ -11,9 +11,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"go-fileprocessor/internal/models"
-	"go-fileprocessor/internal/processors"
-	"go-fileprocessor/internal/storage"
+	"fileprocessor/internal/models"
+	"fileprocessor/internal/processors"
+	"fileprocessor/internal/storage"
 )
 
 // FileHandler handles file operations
