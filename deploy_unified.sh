@@ -61,13 +61,15 @@ copy_files() {
 # Function to install Go
 install_go() {
     echo -e "${YELLOW}[3] Checking Go installation...${NC}"
+    LATEST_GO_VERSION="1.24.2"
+    
     if ! command -v go &> /dev/null; then
-        echo -e "   Go is not installed. Installing Go $GO_VERSION..."
+        echo -e "   Go is not installed. Installing Go $LATEST_GO_VERSION..."
         
         # Download and install Go
-        wget https://go.dev/dl/go$GO_VERSION.linux-amd64.tar.gz
+        wget https://go.dev/dl/go$LATEST_GO_VERSION.linux-amd64.tar.gz
         sudo rm -rf /usr/local/go
-        sudo tar -C /usr/local -xzf go$GO_VERSION.linux-amd64.tar.gz
+        sudo tar -C /usr/local -xzf go$LATEST_GO_VERSION.linux-amd64.tar.gz
         
         # Add Go to PATH in both .bashrc and .profile for broader compatibility
         if ! grep -q "export PATH=\$PATH:/usr/local/go/bin" ~/.bashrc; then
@@ -79,34 +81,49 @@ install_go() {
         fi
         
         export PATH=$PATH:/usr/local/go/bin
-        rm go$GO_VERSION.linux-amd64.tar.gz
-        echo -e "   ${GREEN}✓${NC} Go $GO_VERSION installed"
+        rm go$LATEST_GO_VERSION.linux-amd64.tar.gz
+        echo -e "   ${GREEN}✓${NC} Go $LATEST_GO_VERSION installed"
     else
         GO_INSTALLED_VERSION=$(go version | awk '{print $3}' | sed 's/go//')
-        echo -e "   ${GREEN}✓${NC} Go $GO_INSTALLED_VERSION already installed"
+        echo -e "   Go $GO_INSTALLED_VERSION detected"
+        
+        # Always check if version needs upgrading to latest
+        if [ "$(printf '%s\n' "$LATEST_GO_VERSION" "$GO_INSTALLED_VERSION" | sort -V | head -n1)" != "$LATEST_GO_VERSION" ]; then
+            echo -e "   ${YELLOW}⚠${NC} Upgrading Go from $GO_INSTALLED_VERSION to $LATEST_GO_VERSION..."
+            
+            wget https://go.dev/dl/go$LATEST_GO_VERSION.linux-amd64.tar.gz
+            sudo rm -rf /usr/local/go
+            sudo tar -C /usr/local -xzf go$LATEST_GO_VERSION.linux-amd64.tar.gz
+            
+            # Ensure PATH is setup correctly
+            if ! grep -q "export PATH=\$PATH:/usr/local/go/bin" ~/.bashrc; then
+                echo "export PATH=\$PATH:/usr/local/go/bin" >> ~/.bashrc
+            fi
+            
+            if ! grep -q "export PATH=\$PATH:/usr/local/go/bin" ~/.profile; then
+                echo "export PATH=\$PATH:/usr/local/go/bin" >> ~/.profile
+            fi
+            
+            export PATH=$PATH:/usr/local/go/bin
+            rm go$LATEST_GO_VERSION.linux-amd64.tar.gz
+            echo -e "   ${GREEN}✓${NC} Go upgraded to $LATEST_GO_VERSION"
+        else
+            echo -e "   ${GREEN}✓${NC} Already using latest Go $GO_INSTALLED_VERSION"
+        fi
     fi
     
-    # Get the installed Go version for compatibility checks
+    # Verify Go installation and version
     GO_INSTALLED_VERSION=$(go version | awk '{print $3}' | sed 's/go//')
     echo -e "   Using Go version: $GO_INSTALLED_VERSION"
     
-    # Check go.mod file for compatibility with installed Go version
+    # No need to adjust go.mod version - we're using the latest Go
     MOD_VERSION=$(grep -m 1 "^go " $APP_DIR/go.mod | awk '{print $2}')
     echo -e "   Go version in go.mod: $MOD_VERSION"
     
-    # Fix go.mod version compatibility if needed
-    if [[ "$MOD_VERSION" > "$GO_INSTALLED_VERSION" ]]; then
-        echo -e "   ${YELLOW}⚠${NC} go.mod requires Go $MOD_VERSION but installed version is $GO_INSTALLED_VERSION"
-        echo -e "   Adjusting go.mod to be compatible with installed Go version..."
-        
-        # Create a backup of the original go.mod
-        cp $APP_DIR/go.mod $APP_DIR/go.mod.bak
-        
-        # Update the go.mod file to match the installed Go version
-        MAJOR_MINOR_VERSION=$(echo $GO_INSTALLED_VERSION | grep -o "^[0-9]\+\.[0-9]\+")
-        sed -i "s/^go .*/go $MAJOR_MINOR_VERSION/" $APP_DIR/go.mod
-        echo -e "   ${GREEN}✓${NC} go.mod updated to use Go $MAJOR_MINOR_VERSION"
-    fi
+    # Explicitly set GOROOT and GOPATH to avoid any issues
+    export GOROOT=/usr/local/go
+    export GOPATH=$HOME/go
+    export PATH=$GOROOT/bin:$GOPATH/bin:$PATH
 }
 
 # Function to build the application

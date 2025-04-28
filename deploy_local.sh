@@ -12,6 +12,7 @@ APP_DIR="/opt/$APP_NAME"
 SERVICE_NAME="$APP_NAME.service"
 USER="$(whoami)"
 PORT=8080
+LATEST_GO_VERSION="1.24.2"
 
 echo "Starting local deployment of Go File Processor..."
 
@@ -43,35 +44,71 @@ sudo chmod -R 755 $APP_DIR
 
 # Check if Go is installed
 if ! command -v go &> /dev/null; then
-    echo "Go is not installed. Installing Go..."
-    # Install Go with latest version
-    wget https://go.dev/dl/go1.24.2.linux-amd64.tar.gz
+    echo "Go is not installed. Installing Go $LATEST_GO_VERSION..."
+    
+    # Download and install Go
+    wget https://go.dev/dl/go$LATEST_GO_VERSION.linux-amd64.tar.gz
     sudo rm -rf /usr/local/go
-    sudo tar -C /usr/local -xzf go1.24.2.linux-amd64.tar.gz
-    echo "export PATH=\$PATH:/usr/local/go/bin" >> ~/.bashrc
+    sudo tar -C /usr/local -xzf go$LATEST_GO_VERSION.linux-amd64.tar.gz
+    
+    # Set up PATH in both .bashrc and .profile for broader compatibility
+    if ! grep -q "export PATH=\$PATH:/usr/local/go/bin" ~/.bashrc; then
+        echo "export PATH=\$PATH:/usr/local/go/bin" >> ~/.bashrc
+    fi
+    
+    if ! grep -q "export PATH=\$PATH:/usr/local/go/bin" ~/.profile; then
+        echo "export PATH=\$PATH:/usr/local/go/bin" >> ~/.profile
+    fi
+    
     export PATH=$PATH:/usr/local/go/bin
-    rm go1.24.2.linux-amd64.tar.gz
+    rm go$LATEST_GO_VERSION.linux-amd64.tar.gz
+    echo "Go $LATEST_GO_VERSION installed successfully"
 else
-    # Check if Go version needs upgrading
+    # Always upgrade to latest version
     GO_INSTALLED_VERSION=$(go version | awk '{print $3}' | sed 's/go//')
     echo "Found Go version: $GO_INSTALLED_VERSION"
     
-    # Compare versions (this is a simple version check)
-    if [ "$(printf '%s\n' "1.24.2" "$GO_INSTALLED_VERSION" | sort -V | head -n1)" != "1.24.2" ]; then
-        echo "Upgrading Go to version 1.24.2..."
-        wget https://go.dev/dl/go1.24.2.linux-amd64.tar.gz
+    # Compare versions and always upgrade if not the latest
+    if [ "$(printf '%s\n' "$LATEST_GO_VERSION" "$GO_INSTALLED_VERSION" | sort -V | head -n1)" != "$LATEST_GO_VERSION" ]; then
+        echo "Upgrading Go from $GO_INSTALLED_VERSION to $LATEST_GO_VERSION..."
+        wget https://go.dev/dl/go$LATEST_GO_VERSION.linux-amd64.tar.gz
         sudo rm -rf /usr/local/go
-        sudo tar -C /usr/local -xzf go1.24.2.linux-amd64.tar.gz
-        rm go1.24.2.linux-amd64.tar.gz
+        sudo tar -C /usr/local -xzf go$LATEST_GO_VERSION.linux-amd64.tar.gz
+        
+        # Ensure PATH is properly set
+        if ! grep -q "export PATH=\$PATH:/usr/local/go/bin" ~/.bashrc; then
+            echo "export PATH=\$PATH:/usr/local/go/bin" >> ~/.bashrc
+        fi
+        
+        if ! grep -q "export PATH=\$PATH:/usr/local/go/bin" ~/.profile; then
+            echo "export PATH=\$PATH:/usr/local/go/bin" >> ~/.profile
+        fi
+        
+        export PATH=$PATH:/usr/local/go/bin
+        rm go$LATEST_GO_VERSION.linux-amd64.tar.gz
+        echo "Go upgraded to $LATEST_GO_VERSION successfully"
     else
-        echo "Go version is up to date."
+        echo "Already using latest Go version $GO_INSTALLED_VERSION"
     fi
 fi
+
+# Set Go environment variables explicitly
+export GOROOT=/usr/local/go
+export GOPATH=$HOME/go
+export PATH=$GOROOT/bin:$GOPATH/bin:$PATH
 
 # Build the application
 echo "Building the application..."
 cd $APP_DIR
+go clean -modcache
+go mod tidy
 go build -o $APP_NAME cmd/server/main.go
+
+if [ $? -ne 0 ]; then
+    echo "Build failed. Please check the error messages above."
+    exit 1
+fi
+echo "Application built successfully"
 
 # Create systemd service file
 echo "Creating systemd service..."
