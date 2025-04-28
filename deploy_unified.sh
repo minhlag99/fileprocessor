@@ -19,7 +19,7 @@ APP_DIR=${APP_DIR:-"/opt/$APP_NAME"}
 SERVICE_NAME=${SERVICE_NAME:-"$APP_NAME.service"}
 USER=${USER:-"$(whoami)"}
 PORT=${PORT:-8080}
-GO_VERSION=${GO_VERSION:-"1.24.2"}  # Updated to latest Go version
+GO_VERSION=${GO_VERSION:-"1.21.5"}  # Target Go version (1.21.5 is more widely compatible)
 
 # Banner
 echo -e "${BLUE}============================================${NC}"
@@ -69,9 +69,13 @@ install_go() {
         sudo rm -rf /usr/local/go
         sudo tar -C /usr/local -xzf go$GO_VERSION.linux-amd64.tar.gz
         
-        # Add Go to PATH
+        # Add Go to PATH in both .bashrc and .profile for broader compatibility
         if ! grep -q "export PATH=\$PATH:/usr/local/go/bin" ~/.bashrc; then
             echo "export PATH=\$PATH:/usr/local/go/bin" >> ~/.bashrc
+        fi
+        
+        if ! grep -q "export PATH=\$PATH:/usr/local/go/bin" ~/.profile; then
+            echo "export PATH=\$PATH:/usr/local/go/bin" >> ~/.profile
         fi
         
         export PATH=$PATH:/usr/local/go/bin
@@ -81,14 +85,52 @@ install_go() {
         GO_INSTALLED_VERSION=$(go version | awk '{print $3}' | sed 's/go//')
         echo -e "   ${GREEN}✓${NC} Go $GO_INSTALLED_VERSION already installed"
     fi
+    
+    # Get the installed Go version for compatibility checks
+    GO_INSTALLED_VERSION=$(go version | awk '{print $3}' | sed 's/go//')
+    echo -e "   Using Go version: $GO_INSTALLED_VERSION"
+    
+    # Check go.mod file for compatibility with installed Go version
+    MOD_VERSION=$(grep -m 1 "^go " $APP_DIR/go.mod | awk '{print $2}')
+    echo -e "   Go version in go.mod: $MOD_VERSION"
+    
+    # Fix go.mod version compatibility if needed
+    if [[ "$MOD_VERSION" > "$GO_INSTALLED_VERSION" ]]; then
+        echo -e "   ${YELLOW}⚠${NC} go.mod requires Go $MOD_VERSION but installed version is $GO_INSTALLED_VERSION"
+        echo -e "   Adjusting go.mod to be compatible with installed Go version..."
+        
+        # Create a backup of the original go.mod
+        cp $APP_DIR/go.mod $APP_DIR/go.mod.bak
+        
+        # Update the go.mod file to match the installed Go version
+        MAJOR_MINOR_VERSION=$(echo $GO_INSTALLED_VERSION | grep -o "^[0-9]\+\.[0-9]\+")
+        sed -i "s/^go .*/go $MAJOR_MINOR_VERSION/" $APP_DIR/go.mod
+        echo -e "   ${GREEN}✓${NC} go.mod updated to use Go $MAJOR_MINOR_VERSION"
+    fi
 }
 
 # Function to build the application
 build_application() {
     echo -e "${YELLOW}[4] Building the application...${NC}"
     cd $APP_DIR
+    
+    # Clear module cache in case of version changes
+    go clean -modcache
+    
+    # First try to tidy the modules with the adjusted go.mod
+    echo -e "   Running go mod tidy to ensure dependencies are correct..."
+    go mod tidy
+    
+    echo -e "   Building application..."
     go build -o $APP_NAME cmd/server/main.go
-    echo -e "   ${GREEN}✓${NC} Application built"
+    
+    if [ $? -eq 0 ]; then
+        echo -e "   ${GREEN}✓${NC} Application built successfully"
+    else
+        echo -e "   ${RED}✗${NC} Build failed"
+        echo -e "   You may need to manually upgrade Go or fix dependency issues"
+        exit 1
+    fi
 }
 
 # Function to create systemd service
