@@ -19,7 +19,7 @@ APP_DIR=${APP_DIR:-"/opt/$APP_NAME"}
 SERVICE_NAME=${SERVICE_NAME:-"$APP_NAME.service"}
 USER=${USER:-"$(whoami)"}
 PORT=${PORT:-8080}
-GO_VERSION=${GO_VERSION:-"1.21.5"}  # Using a more recent Go version
+GO_VERSION=${GO_VERSION:-"1.24.2"}  # Updated to latest Go version
 
 # Banner
 echo -e "${BLUE}============================================${NC}"

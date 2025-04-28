@@ -41,12 +41,29 @@ sudo chmod -R 755 $APP_DIR
 # Check if Go is installed
 if ! command -v go &> /dev/null; then
     echo "Go is not installed. Installing Go..."
-    # Install Go (adjust version as needed)
-    wget https://go.dev/dl/go1.20.2.linux-amd64.tar.gz
-    sudo tar -C /usr/local -xzf go1.20.2.linux-amd64.tar.gz
-    echo "export PATH=$PATH:/usr/local/go/bin" >> ~/.profile
-    source ~/.profile
-    rm go1.20.2.linux-amd64.tar.gz
+    # Install Go with the latest version
+    wget https://go.dev/dl/go1.24.2.linux-amd64.tar.gz
+    sudo rm -rf /usr/local/go
+    sudo tar -C /usr/local -xzf go1.24.2.linux-amd64.tar.gz
+    echo "export PATH=\$PATH:/usr/local/go/bin" >> ~/.profile
+    echo "export PATH=\$PATH:/usr/local/go/bin" >> ~/.bashrc
+    export PATH=$PATH:/usr/local/go/bin
+    rm go1.24.2.linux-amd64.tar.gz
+else
+    # Check if Go version needs upgrading
+    GO_INSTALLED_VERSION=$(go version | awk '{print $3}' | sed 's/go//')
+    echo "Found Go version: $GO_INSTALLED_VERSION"
+    
+    # Compare versions (this is a simple version check)
+    if [ "$(printf '%s\n' "1.24.2" "$GO_INSTALLED_VERSION" | sort -V | head -n1)" != "1.24.2" ]; then
+        echo "Upgrading Go to version 1.24.2..."
+        wget https://go.dev/dl/go1.24.2.linux-amd64.tar.gz
+        sudo rm -rf /usr/local/go
+        sudo tar -C /usr/local -xzf go1.24.2.linux-amd64.tar.gz
+        rm go1.24.2.linux-amd64.tar.gz
+    else
+        echo "Go version is up to date."
+    fi
 fi
 
 # Build the application
@@ -146,12 +163,6 @@ server {
 EOF
 
     sudo mv /tmp/$APP_NAME.conf /etc/nginx/sites-available/
-
-    # Install Nginx if not already installed
-    if ! command -v nginx &> /dev/null; then
-        echo "Installing Nginx..."
-        sudo apt-get update && sudo apt-get install -y nginx
-    fi
 
     # Enable the site if sites-enabled directory exists
     if [ -d "/etc/nginx/sites-enabled" ]; then
