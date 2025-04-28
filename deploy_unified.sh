@@ -13,9 +13,34 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+# Detect operating system
+OS_TYPE="linux"
+if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" || "$OSTYPE" == "win32" ]]; then
+    OS_TYPE="windows"
+    echo -e "${YELLOW}Windows environment detected.${NC}"
+    echo -e "For Windows deployment, please use the ${GREEN}deploy_windows.bat${NC} script instead."
+    echo -e "Running this script on Windows may cause errors due to Linux commands."
+    read -p "Do you want to continue anyway? (y/n): " continue_anyway
+    
+    if [[ ! $continue_anyway == [Yy]* ]]; then
+        echo -e "${BLUE}Exiting. Please use deploy_windows.bat for Windows deployments.${NC}"
+        exit 0
+    fi
+    
+    echo -e "${RED}Warning: Continuing on Windows without sudo. Some commands may fail.${NC}"
+    
+    # Create a dummy sudo function that just executes the command directly
+    sudo() {
+        "$@"
+    }
+fi
+
 # Default configuration (can be overridden with environment variables)
 APP_NAME=${APP_NAME:-"go-fileprocessor"}
 APP_DIR=${APP_DIR:-"/opt/$APP_NAME"}
+if [[ "$OS_TYPE" == "windows" ]]; then
+    APP_DIR=${APP_DIR:-"$HOME/$APP_NAME"}
+fi
 SERVICE_NAME=${SERVICE_NAME:-"$APP_NAME.service"}
 USER=${USER:-"$(whoami)"}
 PORT=${PORT:-8080}
@@ -97,22 +122,39 @@ deploy_local() {
     PUBLIC_IP=$(curl -s https://api.ipify.org || curl -s http://checkip.amazonaws.com || hostname -I | awk '{print $1}')
     echo -e "Detected IP: ${GREEN}$PUBLIC_IP${NC} (You'll use this to access the application)"
     
+    if [[ "$OS_TYPE" == "windows" ]]; then
+        echo -e "${YELLOW}Windows environment detected for local deployment.${NC}"
+        echo -e "For best results, please use ${GREEN}deploy_windows.bat${NC} instead."
+        echo -e "Continuing with limited functionality..."
+    fi
+    
     create_directories
     copy_files
     install_go
     build_application
-    create_service
-    configure_firewall
     
-    # Ask if user wants to install Nginx
-    read -p "Do you want to install and configure Nginx? (y/n): " install_nginx_input
-    if [[ $install_nginx_input == [Yy]* ]]; then
-        install_nginx
+    if [[ "$OS_TYPE" != "windows" ]]; then
+        create_service
+        configure_firewall
+        
+        # Ask if user wants to install Nginx
+        read -p "Do you want to install and configure Nginx? (y/n): " install_nginx_input
+        if [[ $install_nginx_input == [Yy]* ]]; then
+            install_nginx
+        else
+            echo -e "${YELLOW}Skipping Nginx installation.${NC}"
+        fi
+        
+        start_application
     else
-        echo -e "${YELLOW}Skipping Nginx installation.${NC}"
+        # Windows-specific deployment steps
+        echo -e "${YELLOW}[5] Starting the application directly...${NC}"
+        echo -e "   Starting the application in a new terminal window"
+        cd $APP_DIR
+        nohup ./$APP_NAME > $APP_DIR/logs/output.log 2> $APP_DIR/logs/error.log &
+        echo -e "   ${GREEN}✓${NC} Application started"
     fi
     
-    start_application
     run_network_diagnostics
     display_connection_info
 }
