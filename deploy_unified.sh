@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Enhanced Unified Deployment Script for Go File Processor
-# This script handles both local and VPS deployments with network diagnostics
+# This script handles local, VPS, and remote desktop deployments
 
 # Exit on any error
 set -e
@@ -44,6 +44,7 @@ fi
 SERVICE_NAME=${SERVICE_NAME:-"$APP_NAME.service"}
 USER=${USER:-"$(whoami)"}
 PORT=${PORT:-8080}
+ALTERNATE_PORT=${ALTERNATE_PORT:-9090}
 LATEST_GO_VERSION="1.24.2"
 
 # Remote deployment variables (only used in remote mode)
@@ -60,11 +61,12 @@ echo -e "${BLUE}============================================${NC}"
 select_deployment_mode() {
     echo -e "\n${YELLOW}Select deployment mode:${NC}"
     echo "1) Local deployment (deploy on this machine)"
-    echo "2) Remote deployment (deploy to VPS)"
-    echo "3) Run network diagnostics only"
+    echo "2) Remote deployment via SSH (deploy to VPS)"
+    echo "3) Direct server deployment (for Remote Desktop/Console access)"
+    echo "4) Run network diagnostics only"
     echo "q) Quit"
     
-    read -p "Enter your choice (1, 2, 3, q): " DEPLOYMENT_MODE
+    read -p "Enter your choice (1, 2, 3, 4, q): " DEPLOYMENT_MODE
     
     case $DEPLOYMENT_MODE in
         1)
@@ -72,11 +74,15 @@ select_deployment_mode() {
             deploy_local
             ;;
         2)
-            echo -e "\n${GREEN}Selected: Remote deployment${NC}"
+            echo -e "\n${GREEN}Selected: Remote deployment via SSH${NC}"
             setup_remote_config
             deploy_remote
             ;;
         3)
+            echo -e "\n${GREEN}Selected: Direct server deployment${NC}"
+            deploy_direct_server
+            ;;
+        4)
             echo -e "\n${GREEN}Selected: Network diagnostics${NC}"
             run_network_diagnostics
             ;;
@@ -89,6 +95,28 @@ select_deployment_mode() {
             select_deployment_mode
             ;;
     esac
+}
+
+# Function to prompt for port configuration
+configure_ports() {
+    echo -e "\n${YELLOW}Port Configuration${NC}"
+    echo "Default application port is $PORT"
+    read -p "Do you want to use a different port? (y/n): " change_port
+    
+    if [[ $change_port == [Yy]* ]]; then
+        read -p "Enter new port number (1024-65535) [default: $ALTERNATE_PORT]: " new_port
+        if [[ ! -z "$new_port" ]]; then
+            if [[ "$new_port" =~ ^[0-9]+$ ]] && [ "$new_port" -ge 1024 -a "$new_port" -le 65535 ]; then
+                PORT=$new_port
+                echo -e "${GREEN}Port set to: $PORT${NC}"
+            else
+                echo -e "${RED}Invalid port. Using default port: $PORT${NC}"
+            fi
+        else
+            PORT=$ALTERNATE_PORT
+            echo -e "${GREEN}Port set to alternate: $PORT${NC}"
+        fi
+    fi
 }
 
 # Function to set up remote deployment configuration
@@ -114,10 +142,16 @@ setup_remote_config() {
         echo -e "  ssh-copy-id $VPS_USER@$VPS_HOST  # Copy your key to the VPS"
         exit 1
     fi
+    
+    # Configure port for remote deployment
+    configure_ports
 }
 
 # Function for all local deployment steps
 deploy_local() {
+    # Configure port
+    configure_ports
+    
     # Get public IP if available (for information purposes)
     PUBLIC_IP=$(curl -s https://api.ipify.org || curl -s http://checkip.amazonaws.com || hostname -I | awk '{print $1}')
     echo -e "Detected IP: ${GREEN}$PUBLIC_IP${NC} (You'll use this to access the application)"
@@ -130,11 +164,13 @@ deploy_local() {
     
     create_directories
     copy_files
+    update_config_file
     install_go
     build_application
     
     if [[ "$OS_TYPE" != "windows" ]]; then
         create_service
+        ensure_ufw_installed
         configure_firewall
         
         # Ask if user wants to install Nginx
@@ -159,6 +195,38 @@ deploy_local() {
     display_connection_info
 }
 
+# Function for direct server deployment (when SSH is not used)
+deploy_direct_server() {
+    # Configure port
+    configure_ports
+    
+    # Get public IP if available (for information purposes)
+    PUBLIC_IP=$(curl -s https://api.ipify.org || curl -s http://checkip.amazonaws.com || hostname -I | awk '{print $1}')
+    echo -e "Detected IP: ${GREEN}$PUBLIC_IP${NC} (You'll use this to access the application)"
+    
+    # For direct server deployment, we're already on the target machine
+    create_directories
+    copy_files
+    update_config_file
+    install_go
+    build_application
+    create_service
+    ensure_ufw_installed
+    configure_firewall
+    
+    # Ask if user wants to install Nginx
+    read -p "Do you want to install and configure Nginx? (y/n): " install_nginx_input
+    if [[ $install_nginx_input == [Yy]* ]]; then
+        install_nginx
+    else
+        echo -e "${YELLOW}Skipping Nginx installation.${NC}"
+    fi
+    
+    start_application
+    run_network_diagnostics
+    display_connection_info
+}
+
 # Function to create required directories
 create_directories() {
     echo -e "${YELLOW}[1] Creating application directories...${NC}"
@@ -166,6 +234,7 @@ create_directories() {
     sudo mkdir -p $APP_DIR/uploads
     sudo mkdir -p $APP_DIR/ui
     sudo mkdir -p $APP_DIR/logs
+    sudo mkdir -p $APP_DIR/config
     echo -e "   ${GREEN}✓${NC} Directories created"
 }
 
@@ -185,6 +254,81 @@ copy_files() {
     sudo chown -R $USER:$USER $APP_DIR
     sudo chmod -R 755 $APP_DIR
     echo -e "   ${GREEN}✓${NC} Files copied and permissions set"
+}
+
+# Function to update configuration file with correct port
+update_config_file() {
+    echo -e "${YELLOW}[3] Updating configuration file...${NC}"
+    
+    if [ -f $APP_DIR/fileprocessor.ini ]; then
+        # Update port in the INI file
+        if grep -q "\[server\]" $APP_DIR/fileprocessor.ini; then
+            # This is an INI format
+            sed -i "s/port = [0-9]*/port = $PORT/" $APP_DIR/fileprocessor.ini
+            # Make sure the enable_lan setting is true
+            sed -i "s/enable_lan = false/enable_lan = true/" $APP_DIR/fileprocessor.ini
+            echo -e "   ${GREEN}✓${NC} Updated INI configuration with port $PORT"
+        else
+            # This might be a JSON format
+            if grep -q "\"port\":" $APP_DIR/fileprocessor.ini; then
+                sed -i "s/\"port\": [0-9]*/\"port\": $PORT/" $APP_DIR/fileprocessor.ini
+                echo -e "   ${GREEN}✓${NC} Updated JSON configuration with port $PORT"
+            else
+                echo -e "   ${YELLOW}!${NC} Could not update port in existing config file"
+                create_default_config
+            fi
+        fi
+    else
+        echo -e "   ${YELLOW}!${NC} No configuration file found"
+        create_default_config
+    fi
+    
+    # Ensure config allows network access
+    if grep -q "\[server\]" $APP_DIR/fileprocessor.ini; then
+        # Make sure host is set to 0.0.0.0 to allow external connections
+        if grep -q "host" $APP_DIR/fileprocessor.ini; then
+            sed -i "s/host = .*/host = 0.0.0.0/" $APP_DIR/fileprocessor.ini
+        else
+            # Add host setting if not present
+            sed -i "/\[server\]/a host = 0.0.0.0" $APP_DIR/fileprocessor.ini
+        fi
+    fi
+    
+    echo -e "   ${GREEN}✓${NC} Configuration updated to allow external connections"
+}
+
+# Function to create a default configuration file
+create_default_config() {
+    echo -e "   Creating default configuration file..."
+    cat > $APP_DIR/fileprocessor.ini << EOF
+[server]
+port = $PORT
+ui_dir = ./ui
+uploads_dir = ./uploads
+host = 0.0.0.0
+worker_count = 4
+enable_lan = true
+shutdown_timeout = 30
+
+[storage]
+default_provider = local
+
+[storage.local]
+base_path = ./uploads
+EOF
+    echo -e "   ${GREEN}✓${NC} Created default configuration file with port $PORT"
+}
+
+# Function to ensure UFW is installed
+ensure_ufw_installed() {
+    echo -e "${YELLOW}[*] Ensuring UFW firewall is installed...${NC}"
+    if ! command -v ufw &> /dev/null; then
+        echo -e "   UFW not found. Installing..."
+        sudo apt-get update && sudo apt-get install -y ufw
+        echo -e "   ${GREEN}✓${NC} UFW installed"
+    else
+        echo -e "   ${GREEN}✓${NC} UFW already installed"
+    fi
 }
 
 # Function to install Go
@@ -325,9 +469,10 @@ configure_firewall() {
     echo -e "${YELLOW}[6] Configuring firewall...${NC}"
     if command -v ufw &> /dev/null; then
         echo -e "   Configuring UFW firewall..."
-        sudo ufw allow 22/tcp
-        sudo ufw allow 80/tcp
-        sudo ufw allow $PORT/tcp
+        sudo ufw allow 22/tcp comment "SSH"
+        sudo ufw allow 80/tcp comment "HTTP"
+        sudo ufw allow 443/tcp comment "HTTPS"
+        sudo ufw allow $PORT/tcp comment "Go File Processor"
         
         if ! sudo ufw status | grep -q "Status: active"; then
             echo "   Enabling firewall..."
@@ -336,8 +481,8 @@ configure_firewall() {
         
         echo -e "   ${GREEN}✓${NC} Firewall configured"
     else
-        echo -e "   ${YELLOW}⚠${NC} UFW not found. Skipping firewall configuration."
-        echo -e "   To install: sudo apt-get update && sudo apt-get install -y ufw"
+        echo -e "   ${RED}×${NC} UFW not found even after attempted installation."
+        echo -e "   Please manually install UFW: sudo apt-get update && sudo apt-get install -y ufw"
     fi
 }
 
@@ -566,17 +711,19 @@ display_connection_info() {
     echo -e "${BLUE}============================================${NC}"
     echo -e "\n${GREEN}Access the application:${NC}"
     echo -e "  - Via HTTP: http://$PUBLIC_IP/"
-    if [ -z "$(command -v nginx)" ] || [ "$(systemctl is-active nginx)" != "active" ]; then
-        echo -e "  - Direct port: http://$PUBLIC_IP:$PORT"
+    echo -e "  - Direct application port: http://$PUBLIC_IP:$PORT/"
+    if [ "$(command -v nginx)" ] && [ "$(systemctl is-active nginx)" == "active" ]; then
+        echo -e "  - Via Nginx: http://$PUBLIC_IP/"
     fi
     echo -e "\n${BLUE}Application Management:${NC}"
     echo -e "  - Check status: sudo systemctl status $APP_NAME"
     echo -e "  - View logs: sudo journalctl -u $APP_NAME"
     echo -e "  - Log files: $APP_DIR/logs/"
     echo -e "\n${BLUE}Troubleshooting:${NC}"
-    echo -e "  - Run this script with option 3 to diagnose network issues"
+    echo -e "  - Run this script with option 4 to diagnose network issues"
     echo -e "  - Check firewall settings: sudo ufw status"
     echo -e "  - Verify Nginx config: sudo nginx -t"
+    echo -e "  - Reload service: sudo systemctl restart $APP_NAME"
     echo -e "${BLUE}============================================${NC}"
 }
 
