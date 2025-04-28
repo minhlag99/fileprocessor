@@ -8,15 +8,14 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
-	"strings"
 )
 
 // Config holds the application configuration
 type Config struct {
-	Server   ServerConfig   `json:"server"`
-	Storage  StorageConfig  `json:"storage"`
-	Workers  WorkerConfig   `json:"workers"`
-	Features FeatureConfig  `json:"features"`
+	Server   ServerConfig  `json:"server"`
+	Storage  StorageConfig `json:"storage"`
+	Workers  WorkerConfig  `json:"workers"`
+	Features FeatureConfig `json:"features"`
 }
 
 // ServerConfig contains server-related configuration
@@ -33,10 +32,10 @@ type ServerConfig struct {
 
 // StorageConfig contains storage-related configuration
 type StorageConfig struct {
-	DefaultProvider string                 `json:"defaultProvider"`
-	Local           map[string]string      `json:"local"`
-	S3              map[string]string      `json:"s3"`
-	Google          map[string]string      `json:"google"`
+	DefaultProvider string            `json:"defaultProvider"`
+	Local           map[string]string `json:"local"`
+	S3              map[string]string `json:"s3"`
+	Google          map[string]string `json:"google"`
 }
 
 // WorkerConfig contains worker pool configuration
@@ -92,7 +91,7 @@ func LoadConfig(configFile string) error {
 			if err != nil {
 				return fmt.Errorf("error reading config file: %w", err)
 			}
-			
+
 			if err := json.Unmarshal(data, &AppConfig); err != nil {
 				return fmt.Errorf("error parsing config file: %w", err)
 			}
@@ -118,23 +117,23 @@ func overrideWithEnv() {
 			AppConfig.Server.Port = p
 		}
 	}
-	
+
 	if uiDir := os.Getenv("FP_UI_DIR"); uiDir != "" {
 		AppConfig.Server.UIDir = uiDir
 	}
-	
+
 	if uploadsDir := os.Getenv("FP_UPLOADS_DIR"); uploadsDir != "" {
 		AppConfig.Server.UploadsDir = uploadsDir
 	}
-	
+
 	if host := os.Getenv("FP_HOST"); host != "" {
 		AppConfig.Server.Host = host
 	}
-	
+
 	if certFile := os.Getenv("FP_CERT_FILE"); certFile != "" {
 		AppConfig.Server.CertFile = certFile
 	}
-	
+
 	if keyFile := os.Getenv("FP_KEY_FILE"); keyFile != "" {
 		AppConfig.Server.KeyFile = keyFile
 	}
@@ -163,19 +162,19 @@ func ensureDirectoriesExist() error {
 		if dir == "" {
 			continue
 		}
-		
+
 		// Resolve relative paths
 		if !filepath.IsAbs(dir) {
 			dir = filepath.Clean(dir)
 		}
-		
+
 		if _, err := os.Stat(dir); os.IsNotExist(err) {
 			if err := os.MkdirAll(dir, 0755); err != nil {
 				return fmt.Errorf("failed to create directory %s: %w", dir, err)
 			}
 		}
 	}
-	
+
 	return nil
 }
 

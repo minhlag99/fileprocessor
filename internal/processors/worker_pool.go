@@ -2,7 +2,6 @@
 package processors
 
 import (
-	"context"
 	"log"
 	"sync"
 	"time"
@@ -10,13 +9,13 @@ import (
 
 // Task represents a processing task
 type Task struct {
-	ID         string                           // Unique ID for the task
-	Process    func() (*ProcessResult, error)   // Function to execute
-	Result     chan *ProcessResult              // Channel to receive the result
-	Error      chan error                       // Channel to receive errors
-	Status     string                           // Status of the task
-	UpdateChan chan map[string]interface{}      // Channel for progress updates
-	Timestamp  time.Time                        // When the task was created
+	ID         string                         // Unique ID for the task
+	Process    func() (*ProcessResult, error) // Function to execute
+	Result     chan *ProcessResult            // Channel to receive the result
+	Error      chan error                     // Channel to receive errors
+	Status     string                         // Status of the task
+	UpdateChan chan map[string]interface{}    // Channel for progress updates
+	Timestamp  time.Time                      // When the task was created
 }
 
 // NewTask creates a new task with the given ID and process function
@@ -69,7 +68,7 @@ func NewWorkerPool(workers, queueSize, maxAttempts int) *WorkerPool {
 	if maxAttempts <= 0 {
 		maxAttempts = 1
 	}
-	
+
 	pool := &WorkerPool{
 		tasks:       make(chan *Task, queueSize),
 		workers:     workers,
@@ -103,7 +102,7 @@ func (p *WorkerPool) Submit(task *Task) error {
 	p.mu.Lock()
 	p.active[task.ID] = task
 	p.mu.Unlock()
-	
+
 	// Submit to the queue
 	select {
 	case p.tasks <- task:
@@ -146,22 +145,22 @@ func (p *WorkerPool) ActiveTasks() int {
 // worker processes tasks from the queue
 func (p *WorkerPool) worker(id int) {
 	defer p.wg.Done()
-	
+
 	log.Printf("Worker %d started", id)
-	
+
 	for {
 		select {
 		case task := <-p.tasks:
 			log.Printf("Worker %d processing task %s", id, task.ID)
-			
+
 			// Process the task
 			result, err := task.Process()
-			
+
 			// Update status
 			p.mu.Lock()
 			delete(p.active, task.ID)
 			p.mu.Unlock()
-			
+
 			// Send result or error
 			if err != nil {
 				log.Printf("Worker %d failed task %s: %v", id, task.ID, err)
