@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Unified deployment script for Go File Processor
-# This script handles both VPS and local deployments
+# Enhanced Unified Deployment Script for Go File Processor
+# This script handles both local and VPS deployments with network diagnostics
 
 # Exit on any error
 set -e
@@ -13,22 +13,109 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Configuration (can be overridden with environment variables)
+# Default configuration (can be overridden with environment variables)
 APP_NAME=${APP_NAME:-"go-fileprocessor"}
 APP_DIR=${APP_DIR:-"/opt/$APP_NAME"}
 SERVICE_NAME=${SERVICE_NAME:-"$APP_NAME.service"}
 USER=${USER:-"$(whoami)"}
 PORT=${PORT:-8080}
-GO_VERSION=${GO_VERSION:-"1.21.5"}  # Target Go version (1.21.5 is more widely compatible)
+LATEST_GO_VERSION="1.24.2"
+
+# Remote deployment variables (only used in remote mode)
+VPS_USER=""
+VPS_HOST=""
+SSH_KEY_PATH="~/.ssh/id_rsa"
 
 # Banner
 echo -e "${BLUE}============================================${NC}"
 echo -e "${BLUE}      Go File Processor Deployment Tool     ${NC}"
 echo -e "${BLUE}============================================${NC}"
 
-# Get public IP
-PUBLIC_IP=$(curl -s https://api.ipify.org || curl -s http://checkip.amazonaws.com || hostname -I | awk '{print $1}')
-echo -e "Detected IP: ${GREEN}$PUBLIC_IP${NC} (You'll use this to access the application)"
+# Function to prompt for deployment mode
+select_deployment_mode() {
+    echo -e "\n${YELLOW}Select deployment mode:${NC}"
+    echo "1) Local deployment (deploy on this machine)"
+    echo "2) Remote deployment (deploy to VPS)"
+    echo "3) Run network diagnostics only"
+    echo "q) Quit"
+    
+    read -p "Enter your choice (1, 2, 3, q): " DEPLOYMENT_MODE
+    
+    case $DEPLOYMENT_MODE in
+        1)
+            echo -e "\n${GREEN}Selected: Local deployment${NC}"
+            deploy_local
+            ;;
+        2)
+            echo -e "\n${GREEN}Selected: Remote deployment${NC}"
+            setup_remote_config
+            deploy_remote
+            ;;
+        3)
+            echo -e "\n${GREEN}Selected: Network diagnostics${NC}"
+            run_network_diagnostics
+            ;;
+        q|Q)
+            echo -e "\n${BLUE}Exiting deployment tool.${NC}"
+            exit 0
+            ;;
+        *)
+            echo -e "\n${RED}Invalid option. Please try again.${NC}"
+            select_deployment_mode
+            ;;
+    esac
+}
+
+# Function to set up remote deployment configuration
+setup_remote_config() {
+    echo -e "\n${YELLOW}Remote Deployment Configuration${NC}"
+    read -p "Enter VPS username (e.g., ubuntu): " VPS_USER
+    read -p "Enter VPS IP address: " VPS_HOST
+    read -p "Enter SSH key path [default: ~/.ssh/id_rsa]: " SSH_KEY_INPUT
+    
+    if [ ! -z "$SSH_KEY_INPUT" ]; then
+        SSH_KEY_PATH=$SSH_KEY_INPUT
+    fi
+    
+    # Verify connection
+    echo -e "\n${YELLOW}Verifying SSH connection...${NC}"
+    if ssh -i $SSH_KEY_PATH -o BatchMode=yes -o ConnectTimeout=5 $VPS_USER@$VPS_HOST echo "Connection successful" &> /dev/null; then
+        echo -e "${GREEN}✓ SSH connection successful${NC}"
+    else
+        echo -e "${RED}× SSH connection failed${NC}"
+        echo -e "Please check your SSH settings and try again.\n"
+        echo -e "If you haven't set up SSH key authentication yet, run:"
+        echo -e "  ssh-keygen -t rsa -b 4096  # Generate SSH key if needed"
+        echo -e "  ssh-copy-id $VPS_USER@$VPS_HOST  # Copy your key to the VPS"
+        exit 1
+    fi
+}
+
+# Function for all local deployment steps
+deploy_local() {
+    # Get public IP if available (for information purposes)
+    PUBLIC_IP=$(curl -s https://api.ipify.org || curl -s http://checkip.amazonaws.com || hostname -I | awk '{print $1}')
+    echo -e "Detected IP: ${GREEN}$PUBLIC_IP${NC} (You'll use this to access the application)"
+    
+    create_directories
+    copy_files
+    install_go
+    build_application
+    create_service
+    configure_firewall
+    
+    # Ask if user wants to install Nginx
+    read -p "Do you want to install and configure Nginx? (y/n): " install_nginx_input
+    if [[ $install_nginx_input == [Yy]* ]]; then
+        install_nginx
+    else
+        echo -e "${YELLOW}Skipping Nginx installation.${NC}"
+    fi
+    
+    start_application
+    run_network_diagnostics
+    display_connection_info
+}
 
 # Function to create required directories
 create_directories() {
@@ -61,7 +148,6 @@ copy_files() {
 # Function to install Go
 install_go() {
     echo -e "${YELLOW}[3] Checking Go installation...${NC}"
-    LATEST_GO_VERSION="1.24.2"
     
     if ! command -v go &> /dev/null; then
         echo -e "   Go is not installed. Installing Go $LATEST_GO_VERSION..."
@@ -116,7 +202,7 @@ install_go() {
     GO_INSTALLED_VERSION=$(go version | awk '{print $3}' | sed 's/go//')
     echo -e "   Using Go version: $GO_INSTALLED_VERSION"
     
-    # No need to adjust go.mod version - we're using the latest Go
+    # Check go.mod version
     MOD_VERSION=$(grep -m 1 "^go " $APP_DIR/go.mod | awk '{print $2}')
     echo -e "   Go version in go.mod: $MOD_VERSION"
     
@@ -134,7 +220,7 @@ build_application() {
     # Clear module cache in case of version changes
     go clean -modcache
     
-    # First try to tidy the modules with the adjusted go.mod
+    # First try to tidy the modules
     echo -e "   Running go mod tidy to ensure dependencies are correct..."
     go mod tidy
     
@@ -145,7 +231,20 @@ build_application() {
         echo -e "   ${GREEN}✓${NC} Application built successfully"
     else
         echo -e "   ${RED}✗${NC} Build failed"
-        echo -e "   You may need to manually upgrade Go or fix dependency issues"
+        echo -e "   Checking logs and attempting to diagnose the issue..."
+        
+        # Check for common build errors and provide guidance
+        if [ -f "$APP_DIR/logs/error.log" ]; then
+            if grep -q "address already in use" "$APP_DIR/logs/error.log"; then
+                echo -e "   ${RED}Error:${NC} Port $PORT is already in use."
+                echo -e "   Solution: Either stop the process using port $PORT or change the port in your configuration."
+            elif grep -q "permission denied" "$APP_DIR/logs/error.log"; then
+                echo -e "   ${RED}Error:${NC} Permission issues detected."
+                echo -e "   Solution: Check file permissions in $APP_DIR"
+            fi
+        fi
+        
+        echo -e "   You may need to manually fix dependency issues or check service logs for details."
         exit 1
     fi
 }
@@ -210,6 +309,16 @@ install_nginx() {
         sudo apt-get update && sudo apt-get install -y nginx
     fi
     
+    # First, check if Nginx is already running on port 80
+    if command -v lsof &> /dev/null; then
+        PORT_CHECK=$(sudo lsof -i:80 | grep -v nginx)
+        if [ ! -z "$PORT_CHECK" ]; then
+            echo -e "   ${RED}Warning:${NC} Port 80 is already in use by another process."
+            echo -e "   $PORT_CHECK"
+            echo -e "   You may need to stop this process before Nginx can use port 80."
+        fi
+    fi
+    
     # Create Nginx configuration
     echo -e "   Creating Nginx configuration..."
     cat > /tmp/$APP_NAME.conf << EOF
@@ -266,8 +375,14 @@ EOF
     fi
     
     # Test and reload Nginx
-    sudo nginx -t && sudo systemctl restart nginx
-    echo -e "   ${GREEN}✓${NC} Nginx configured"
+    echo -e "   Testing Nginx configuration..."
+    if sudo nginx -t; then
+        sudo systemctl restart nginx
+        echo -e "   ${GREEN}✓${NC} Nginx configured and restarted"
+    else
+        echo -e "   ${RED}✗${NC} Nginx configuration test failed"
+        echo -e "   You may need to manually fix the Nginx configuration"
+    fi
 }
 
 # Function to start the application
@@ -281,64 +396,274 @@ start_application() {
         echo -e "   ${GREEN}✓${NC} Application started successfully"
     else
         echo -e "   ${RED}✗${NC} Failed to start application"
-        echo -e "   Check logs: sudo journalctl -u $SERVICE_NAME -n 50"
+        echo -e "   Checking logs for errors..."
+        
+        # Try to show the most relevant part of the logs to diagnose the issue
+        LOGS=$(sudo journalctl -u $SERVICE_NAME -n 20 --no-pager)
+        ERROR_LINES=$(echo "$LOGS" | grep -i "error\|failed\|fatal" | tail -n 5)
+        
+        if [ ! -z "$ERROR_LINES" ]; then
+            echo -e "\n${RED}Error details:${NC}"
+            echo -e "$ERROR_LINES"
+        fi
+        
+        echo -e "\nFor complete logs: sudo journalctl -u $SERVICE_NAME -n 50"
+        
+        # Check for common issues
+        if netstat -tuln 2>/dev/null | grep -q ":$PORT "; then
+            echo -e "\n${RED}Port $PORT is already in use by another process.${NC}"
+            echo -e "Try changing the port in fileprocessor.ini or stop the conflicting service."
+        fi
+        
         exit 1
+    fi
+}
+
+# Function to run network diagnostics
+run_network_diagnostics() {
+    echo -e "${YELLOW}[9] Running network diagnostics...${NC}"
+    
+    # Get private IP (internal network)
+    PRIVATE_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "Unknown")
+    echo -e "  - Private IP: ${GREEN}$PRIVATE_IP${NC} (accessible from your internal network)"
+    
+    # Get public IP (internet-facing)
+    PUBLIC_IP=$(curl -s https://api.ipify.org || curl -s http://checkip.amazonaws.com || echo "Could not determine")
+    if [ "$PUBLIC_IP" != "Could not determine" ]; then
+        echo -e "  - Public IP:  ${GREEN}$PUBLIC_IP${NC} (potentially accessible from the internet)"
+    else
+        echo -e "  - Public IP:  ${RED}Could not determine${NC} (may be behind NAT or firewall)"
+    fi
+    
+    # Check listening ports
+    echo -e "\n  Checking listening ports..."
+    if command -v ss &> /dev/null; then
+        TOOL="ss -tulpn"
+    elif command -v netstat &> /dev/null; then
+        TOOL="netstat -tulpn"
+    else
+        echo -e "  ${RED}Cannot check listening ports (ss/netstat not installed)${NC}"
+        echo "  To install: sudo apt-get update && sudo apt-get install net-tools"
+        TOOL=""
+    fi
+    
+    if [ ! -z "$TOOL" ]; then
+        if $TOOL 2>/dev/null | grep -q ":$PORT "; then
+            echo -e "  - Port $PORT: ${GREEN}LISTENING${NC} (Application port)"
+        else
+            echo -e "  - Port $PORT: ${RED}NOT LISTENING${NC} (Application might not be running)"
+        fi
+        
+        if $TOOL 2>/dev/null | grep -q ":80 "; then
+            echo -e "  - Port 80:   ${GREEN}LISTENING${NC} (HTTP/Nginx)"
+        else
+            echo -e "  - Port 80:   ${RED}NOT LISTENING${NC} (HTTP/Nginx might not be running)"
+        fi
+    fi
+    
+    # Check firewall status
+    echo -e "\n  Checking firewall rules..."
+    if command -v ufw &> /dev/null; then
+        UFW_STATUS=$(sudo ufw status | grep "Status: " | awk '{print $2}')
+        if [ "$UFW_STATUS" = "active" ]; then
+            echo -e "  - Firewall:  ${GREEN}ACTIVE${NC}"
+            
+            # Check if ports are open
+            HTTP_ALLOWED=$(sudo ufw status | grep "80/tcp" | grep "ALLOW" | wc -l)
+            APP_PORT_ALLOWED=$(sudo ufw status | grep "$PORT/tcp" | grep "ALLOW" | wc -l)
+            
+            if [ $HTTP_ALLOWED -gt 0 ]; then
+                echo -e "    - Port 80:   ${GREEN}OPEN${NC}"
+            else
+                echo -e "    - Port 80:   ${RED}CLOSED${NC}"
+            fi
+            
+            if [ $APP_PORT_ALLOWED -gt 0 ]; then
+                echo -e "    - Port $PORT: ${GREEN}OPEN${NC}"
+            else
+                echo -e "    - Port $PORT: ${RED}CLOSED${NC}"
+            fi
+        else
+            echo -e "  - Firewall:  ${YELLOW}INACTIVE${NC} (all ports open)"
+        fi
+    else
+        echo -e "  - Firewall:  ${YELLOW}NOT INSTALLED${NC}"
+    fi
+    
+    # Check HTTP connectivity
+    echo -e "\n  Testing HTTP connectivity..."
+    if command -v curl &> /dev/null; then
+        # Test local app connection
+        HTTP_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:$PORT 2>/dev/null || echo "Failed")
+        if [ "$HTTP_RESPONSE" = "200" ] || [ "$HTTP_RESPONSE" = "302" ] || [ "$HTTP_RESPONSE" = "301" ]; then
+            echo -e "  - Local app: ${GREEN}REACHABLE${NC} (HTTP $HTTP_RESPONSE)"
+        else
+            echo -e "  - Local app: ${RED}NOT REACHABLE${NC} (HTTP $HTTP_RESPONSE)"
+        fi
+        
+        # Test local nginx if installed
+        if command -v nginx &> /dev/null; then
+            HTTP_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost 2>/dev/null || echo "Failed")
+            if [ "$HTTP_RESPONSE" = "200" ] || [ "$HTTP_RESPONSE" = "302" ] || [ "$HTTP_RESPONSE" = "301" ]; then
+                echo -e "  - Local web: ${GREEN}REACHABLE${NC} (HTTP $HTTP_RESPONSE)"
+            else
+                echo -e "  - Local web: ${RED}NOT REACHABLE${NC} (HTTP $HTTP_RESPONSE)"
+            fi
+        fi
+    else
+        echo -e "  - HTTP Test: ${YELLOW}SKIPPED${NC} (curl not installed)"
     fi
 }
 
 # Function to display connection information
 display_connection_info() {
-    echo -e "${YELLOW}[9] Testing connectivity...${NC}"
-    
-    # Check if curl is installed
-    if command -v curl &> /dev/null; then
-        # Test local connection
-        HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:$PORT || echo "Connection failed")
-        
-        if [ "$HTTP_STATUS" = "200" ] || [ "$HTTP_STATUS" = "302" ] || [ "$HTTP_STATUS" = "301" ]; then
-            echo -e "   Local access: ${GREEN}SUCCESS${NC} (HTTP Status: $HTTP_STATUS)"
-        else
-            echo -e "   Local access: ${RED}FAILED${NC} (HTTP Status: $HTTP_STATUS)"
-            echo -e "   Make sure your application is running properly."
-        fi
-    else
-        echo -e "   ${YELLOW}⚠${NC} curl is not installed. Cannot test connectivity."
-        echo -e "   To install: sudo apt-get update && sudo apt-get install curl"
-    fi
+    echo -e "${YELLOW}[10] Connection summary...${NC}"
     
     echo -e "\n${BLUE}============================================${NC}"
     echo -e "${BLUE}      Deployment Complete!                  ${NC}"
     echo -e "${BLUE}============================================${NC}"
     echo -e "\n${GREEN}Access the application:${NC}"
     echo -e "  - Via HTTP: http://$PUBLIC_IP/"
-    echo -e "  - Direct port: http://$PUBLIC_IP:$PORT"
+    if [ -z "$(command -v nginx)" ] || [ "$(systemctl is-active nginx)" != "active" ]; then
+        echo -e "  - Direct port: http://$PUBLIC_IP:$PORT"
+    fi
     echo -e "\n${BLUE}Application Management:${NC}"
     echo -e "  - Check status: sudo systemctl status $APP_NAME"
     echo -e "  - View logs: sudo journalctl -u $APP_NAME"
     echo -e "  - Log files: $APP_DIR/logs/"
+    echo -e "\n${BLUE}Troubleshooting:${NC}"
+    echo -e "  - Run this script with option 3 to diagnose network issues"
+    echo -e "  - Check firewall settings: sudo ufw status"
+    echo -e "  - Verify Nginx config: sudo nginx -t"
     echo -e "${BLUE}============================================${NC}"
 }
 
-# Main execution flow
-main() {
-    create_directories
-    copy_files
-    install_go
-    build_application
-    create_service
-    configure_firewall
+# Function for remote deployment
+deploy_remote() {
+    echo -e "${YELLOW}Preparing remote deployment to ${VPS_USER}@${VPS_HOST}...${NC}"
     
-    # Ask if user wants to install Nginx
-    read -p "Do you want to install and configure Nginx? (y/n): " install_nginx_input
-    if [[ $install_nginx_input == [Yy]* ]]; then
-        install_nginx
-    else
-        echo -e "${YELLOW}Skipping Nginx installation.${NC}"
+    # Build the application locally for Linux
+    echo -e "${YELLOW}[1] Building application for Linux...${NC}"
+    GOOS=linux GOARCH=amd64 go build -o fileprocessor ./cmd/server/main.go
+    
+    # Create config file if it doesn't exist
+    if [ ! -f fileprocessor.ini ]; then
+        echo -e "${YELLOW}[2] Creating default config file...${NC}"
+        cat > fileprocessor.ini << EOF
+{
+    "server": {
+        "port": $PORT,
+        "uiDir": "./ui",
+        "uploadsDir": "./uploads",
+        "host": "0.0.0.0",
+        "shutdownTimeout": 30
+    },
+    "storage": {
+        "defaultProvider": "local",
+        "local": {
+            "basePath": "./uploads"
+        }
+    },
+    "workers": {
+        "count": 4,
+        "queueSize": 100,
+        "maxAttempts": 3
+    },
+    "features": {
+        "enableLAN": true,
+        "enableProcessing": true,
+        "enableCloudStorage": true,
+        "enableProgressUpdates": true
+    }
+}
+EOF
     fi
+
+    echo -e "${YELLOW}[3] Creating deployment directory on VPS...${NC}"
+    ssh -i $SSH_KEY_PATH $VPS_USER@$VPS_HOST "sudo mkdir -p $APP_DIR && sudo chown $VPS_USER:$VPS_USER $APP_DIR && mkdir -p $APP_DIR/ui $APP_DIR/uploads $APP_DIR/logs"
+
+    echo -e "${YELLOW}[4] Copying application files to VPS...${NC}"
+    scp -i $SSH_KEY_PATH fileprocessor fileprocessor.ini $VPS_USER@$VPS_HOST:$APP_DIR/
+    scp -i $SSH_KEY_PATH -r ui/* $VPS_USER@$VPS_HOST:$APP_DIR/ui/
+
+    # Copy systemd service file
+    echo -e "${YELLOW}[5] Setting up systemd service on VPS...${NC}"
+    cat > /tmp/fileprocessor.service << EOF
+[Unit]
+Description=Go File Processor Service
+After=network.target
+
+[Service]
+Type=simple
+User=$VPS_USER
+WorkingDirectory=$APP_DIR
+ExecStart=$APP_DIR/fileprocessor
+Restart=always
+RestartSec=3
+StandardOutput=append:$APP_DIR/logs/output.log
+StandardError=append:$APP_DIR/logs/error.log
+Environment="PORT=$PORT"
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    scp -i $SSH_KEY_PATH /tmp/fileprocessor.service $VPS_USER@$VPS_HOST:/tmp/
+    ssh -i $SSH_KEY_PATH $VPS_USER@$VPS_HOST "sudo mv /tmp/fileprocessor.service /etc/systemd/system/"
+
+    echo -e "${YELLOW}[6] Setting up firewall on VPS...${NC}"
+    ssh -i $SSH_KEY_PATH $VPS_USER@$VPS_HOST "sudo -S ufw allow $PORT/tcp && sudo ufw allow 80/tcp && sudo ufw allow 22/tcp"
+
+    echo -e "${YELLOW}[7] Configuring and starting service...${NC}"
+    ssh -i $SSH_KEY_PATH $VPS_USER@$VPS_HOST "sudo systemctl daemon-reload && sudo systemctl enable fileprocessor.service && sudo systemctl restart fileprocessor.service"
+
+    echo -e "${YELLOW}[8] Setting up Nginx (if available)...${NC}"
+    ssh -i $SSH_KEY_PATH $VPS_USER@$VPS_HOST "if command -v nginx &> /dev/null; then 
+        sudo bash -c 'cat > /etc/nginx/sites-available/fileprocessor.conf << EOF
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
     
-    start_application
-    display_connection_info
+    server_name \$(curl -s http://checkip.amazonaws.com || hostname -I | awk \"{print \\\$1}\") _;
+    
+    location / {
+        proxy_pass http://localhost:$PORT;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \\$http_upgrade;
+        proxy_set_header Connection \"upgrade\";
+        proxy_set_header Host \\$host;
+        proxy_cache_bypass \\$http_upgrade;
+    }
+    
+    client_max_body_size 500M;
+}
+EOF'
+        sudo ln -sf /etc/nginx/sites-available/fileprocessor.conf /etc/nginx/sites-enabled/
+        sudo rm -f /etc/nginx/sites-enabled/default &> /dev/null
+        sudo nginx -t && sudo systemctl restart nginx
+        echo 'Nginx configured'
+    else
+        echo 'Nginx not installed on VPS'
+    fi"
+
+    echo -e "${YELLOW}[9] Checking service status...${NC}"
+    ssh -i $SSH_KEY_PATH $VPS_USER@$VPS_HOST "sudo systemctl status fileprocessor.service || echo 'Service not started properly'"
+
+    # Get the VPS public IP
+    REMOTE_IP=$(ssh -i $SSH_KEY_PATH $VPS_USER@$VPS_HOST "curl -s http://checkip.amazonaws.com || hostname -I | awk '{print \$1}'")
+    
+    echo -e "\n${BLUE}============================================${NC}"
+    echo -e "${BLUE}      Remote Deployment Complete!           ${NC}"
+    echo -e "${BLUE}============================================${NC}"
+    echo -e "\n${GREEN}Access the application:${NC}"
+    echo -e "  - Via HTTP: http://$REMOTE_IP/"
+    echo -e "  - Direct port: http://$REMOTE_IP:$PORT"
+    echo -e "\n${BLUE}Remote Management:${NC}"
+    echo -e "  - SSH into server: ssh -i $SSH_KEY_PATH $VPS_USER@$VPS_HOST"
+    echo -e "  - Check status: sudo systemctl status fileprocessor"
+    echo -e "  - View logs: sudo journalctl -u fileprocessor"
+    echo -e "  - Restart service: sudo systemctl restart fileprocessor"
+    echo -e "${BLUE}============================================${NC}"
 }
 
-# Execute main function
-main
+# Start by selecting deployment mode
+select_deployment_mode
