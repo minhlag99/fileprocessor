@@ -248,7 +248,21 @@ copy_files() {
     sudo cp -r $CURRENT_DIR/config $APP_DIR/ 2>/dev/null || true
     sudo cp -r $CURRENT_DIR/ui $APP_DIR/
     sudo cp $CURRENT_DIR/go.mod $CURRENT_DIR/go.sum $APP_DIR/
-    sudo cp $CURRENT_DIR/fileprocessor.ini $APP_DIR/ 2>/dev/null || true
+    
+    # Copy both INI and JSON configs for flexibility
+    if [ -f $CURRENT_DIR/fileprocessor.ini ]; then
+        sudo cp $CURRENT_DIR/fileprocessor.ini $APP_DIR/ 2>/dev/null || true
+    fi
+    
+    # Copy the JSON config that we know works
+    if [ -f $CURRENT_DIR/config/fileprocessor.json ]; then
+        sudo cp $CURRENT_DIR/config/fileprocessor.json $APP_DIR/ 2>/dev/null || true
+    elif [ -f $CURRENT_DIR/fileprocessor.json ]; then
+        sudo cp $CURRENT_DIR/fileprocessor.json $APP_DIR/ 2>/dev/null || true
+    else
+        # Create a JSON config if none exists
+        create_json_config
+    fi
     
     # Set proper permissions
     sudo chown -R $USER:$USER $APP_DIR
@@ -256,10 +270,65 @@ copy_files() {
     echo -e "   ${GREEN}✓${NC} Files copied and permissions set"
 }
 
+# Function to create a default JSON configuration file
+create_json_config() {
+    echo -e "   Creating default JSON configuration file..."
+    cat > /tmp/fileprocessor.json << EOF
+{
+    "server": {
+        "port": $PORT,
+        "uiDir": "./ui",
+        "uploadsDir": "./uploads",
+        "workerCount": 4,
+        "enableLan": true,
+        "shutdownTimeout": 30,
+        "host": "0.0.0.0"
+    },
+    "storage": {
+        "defaultProvider": "local",
+        "local": {
+            "basePath": "./uploads"
+        },
+        "s3": {
+            "region": "",
+            "bucket": "",
+            "accessKey": "",
+            "secretKey": "",
+            "prefix": ""
+        },
+        "google": {
+            "bucket": "",
+            "credentialFile": "",
+            "prefix": ""
+        }
+    },
+    "workers": {
+        "count": 4,
+        "queueSize": 100,
+        "maxAttempts": 3
+    },
+    "features": {
+        "enableLAN": true,
+        "enableProcessing": true,
+        "enableCloudStorage": false,
+        "enableProgressUpdates": true
+    },
+    "ssl": {
+        "enable": false,
+        "certFile": "",
+        "keyFile": ""
+    }
+}
+EOF
+    sudo mv /tmp/fileprocessor.json $APP_DIR/
+    echo -e "   ${GREEN}✓${NC} Created default JSON configuration file with port $PORT"
+}
+
 # Function to update configuration file with correct port
 update_config_file() {
-    echo -e "${YELLOW}[3] Updating configuration file...${NC}"
+    echo -e "${YELLOW}[3] Updating configuration files...${NC}"
     
+    # Update INI file if it exists (for backward compatibility)
     if [ -f $APP_DIR/fileprocessor.ini ]; then
         # Update port in the INI file
         if grep -q "\[server\]" $APP_DIR/fileprocessor.ini; then
@@ -269,54 +338,37 @@ update_config_file() {
             sed -i "s/enable_lan = false/enable_lan = true/" $APP_DIR/fileprocessor.ini
             echo -e "   ${GREEN}✓${NC} Updated INI configuration with port $PORT"
         else
-            # This might be a JSON format
-            if grep -q "\"port\":" $APP_DIR/fileprocessor.ini; then
-                sed -i "s/\"port\": [0-9]*/\"port\": $PORT/" $APP_DIR/fileprocessor.ini
-                echo -e "   ${GREEN}✓${NC} Updated JSON configuration with port $PORT"
+            echo -e "   ${YELLOW}!${NC} Could not update port in existing INI file"
+        fi
+        
+        # Ensure config allows network access
+        if grep -q "\[server\]" $APP_DIR/fileprocessor.ini; then
+            # Make sure host is set to 0.0.0.0 to allow external connections
+            if grep -q "host" $APP_DIR/fileprocessor.ini; then
+                sed -i "s/host = .*/host = 0.0.0.0/" $APP_DIR/fileprocessor.ini
             else
-                echo -e "   ${YELLOW}!${NC} Could not update port in existing config file"
-                create_default_config
+                # Add host setting if not present
+                sed -i "/\[server\]/a host = 0.0.0.0" $APP_DIR/fileprocessor.ini
             fi
         fi
     else
-        echo -e "   ${YELLOW}!${NC} No configuration file found"
-        create_default_config
+        echo -e "   ${YELLOW}!${NC} No INI configuration file found"
     fi
     
-    # Ensure config allows network access
-    if grep -q "\[server\]" $APP_DIR/fileprocessor.ini; then
-        # Make sure host is set to 0.0.0.0 to allow external connections
-        if grep -q "host" $APP_DIR/fileprocessor.ini; then
-            sed -i "s/host = .*/host = 0.0.0.0/" $APP_DIR/fileprocessor.ini
-        else
-            # Add host setting if not present
-            sed -i "/\[server\]/a host = 0.0.0.0" $APP_DIR/fileprocessor.ini
-        fi
+    # Update JSON file (the one we will actually use)
+    if [ -f $APP_DIR/fileprocessor.json ]; then
+        # Update port in JSON
+        sed -i 's/"port": [0-9]*/"port": '$PORT'/' $APP_DIR/fileprocessor.json
+        # Ensure network access settings
+        sed -i 's/"host": "[^"]*"/"host": "0.0.0.0"/' $APP_DIR/fileprocessor.json
+        sed -i 's/"enableLan": false/"enableLan": true/' $APP_DIR/fileprocessor.json
+        echo -e "   ${GREEN}✓${NC} Updated JSON configuration with port $PORT"
+    else
+        # Create JSON config if it doesn't exist
+        create_json_config
     fi
     
     echo -e "   ${GREEN}✓${NC} Configuration updated to allow external connections"
-}
-
-# Function to create a default configuration file
-create_default_config() {
-    echo -e "   Creating default configuration file..."
-    cat > $APP_DIR/fileprocessor.ini << EOF
-[server]
-port = $PORT
-ui_dir = ./ui
-uploads_dir = ./uploads
-host = 0.0.0.0
-worker_count = 4
-enable_lan = true
-shutdown_timeout = 30
-
-[storage]
-default_provider = local
-
-[storage.local]
-base_path = ./uploads
-EOF
-    echo -e "   ${GREEN}✓${NC} Created default configuration file with port $PORT"
 }
 
 # Function to ensure UFW is installed
@@ -447,12 +499,13 @@ After=network.target
 Type=simple
 User=$USER
 WorkingDirectory=$APP_DIR
-ExecStart=$APP_DIR/$APP_NAME
+ExecStart=$APP_DIR/$APP_NAME --config=$APP_DIR/fileprocessor.json
 Restart=always
 RestartSec=3
 StandardOutput=append:$APP_DIR/logs/output.log
 StandardError=append:$APP_DIR/logs/error.log
 Environment="PORT=$PORT"
+Environment="HOST=0.0.0.0"
 
 [Install]
 WantedBy=multi-user.target
@@ -572,9 +625,30 @@ EOF
     fi
 }
 
-# Function to start the application
+# Function to start the application with better error reporting
 start_application() {
     echo -e "${YELLOW}[8] Starting the application...${NC}"
+    
+    # Create log directories if not exist
+    sudo mkdir -p $APP_DIR/logs
+    
+    # Try running directly first to catch any immediate errors
+    echo -e "   Testing application before starting service..."
+    cd $APP_DIR
+    DIRECT_OUTPUT=$($APP_DIR/$APP_NAME --config=$APP_DIR/fileprocessor.json --test-config 2>&1 || echo "Failed to start")
+    
+    if [[ $DIRECT_OUTPUT == *"Failed to start"* ]]; then
+        echo -e "   ${RED}✗${NC} Application failed during pre-test"
+        echo -e "   Error output: $DIRECT_OUTPUT"
+        echo -e "   Attempting to fix common configuration issues..."
+        
+        # Try to fix common issues - use JSON format
+        create_json_config
+    else
+        echo -e "   ${GREEN}✓${NC} Application configuration test passed"
+    fi
+    
+    # Start the service
     sudo systemctl start $SERVICE_NAME
     
     # Check if application started successfully
@@ -594,13 +668,37 @@ start_application() {
             echo -e "$ERROR_LINES"
         fi
         
+        # Check application logs
+        if [ -f "$APP_DIR/logs/error.log" ]; then
+            APP_ERROR=$(tail -n 10 "$APP_DIR/logs/error.log")
+            echo -e "\n${RED}Application error log:${NC}"
+            echo -e "$APP_ERROR"
+        fi
+        
         echo -e "\nFor complete logs: sudo journalctl -u $SERVICE_NAME -n 50"
+        echo -e "Application logs: sudo cat $APP_DIR/logs/error.log"
         
         # Check for common issues
         if netstat -tuln 2>/dev/null | grep -q ":$PORT "; then
             echo -e "\n${RED}Port $PORT is already in use by another process.${NC}"
-            echo -e "Try changing the port in fileprocessor.ini or stop the conflicting service."
+            echo -e "Try changing the port in the configuration file or stop the conflicting service."
         fi
+        
+        # Attempt to run the application directly to get better error information
+        echo -e "\n${YELLOW}Attempting to run application directly for better error information...${NC}"
+        cd $APP_DIR
+        $APP_DIR/$APP_NAME --config=$APP_DIR/fileprocessor.json --verbose > $APP_DIR/logs/direct-output.log 2> $APP_DIR/logs/direct-error.log &
+        DIRECT_PID=$!
+        sleep 3
+        kill $DIRECT_PID 2>/dev/null || true
+        
+        echo -e "Direct run logs saved to: $APP_DIR/logs/direct-error.log"
+        echo -e "Check these logs for more detailed error information."
+        
+        # Try to fix permission issues
+        echo -e "\n${YELLOW}Fixing potential permission issues...${NC}"
+        sudo chown -R $USER:$USER $APP_DIR
+        sudo chmod -R 755 $APP_DIR
         
         exit 1
     fi
@@ -735,22 +833,35 @@ deploy_remote() {
     echo -e "${YELLOW}[1] Building application for Linux...${NC}"
     GOOS=linux GOARCH=amd64 go build -o fileprocessor ./cmd/server/main.go
     
-    # Create config file if it doesn't exist
-    if [ ! -f fileprocessor.ini ]; then
-        echo -e "${YELLOW}[2] Creating default config file...${NC}"
-        cat > fileprocessor.ini << EOF
+    # Create JSON config file
+    echo -e "${YELLOW}[2] Creating JSON config file...${NC}"
+    cat > fileprocessor.json << EOF
 {
     "server": {
         "port": $PORT,
         "uiDir": "./ui",
         "uploadsDir": "./uploads",
-        "host": "0.0.0.0",
-        "shutdownTimeout": 30
+        "workerCount": 4,
+        "enableLan": true,
+        "shutdownTimeout": 30,
+        "host": "0.0.0.0"
     },
     "storage": {
         "defaultProvider": "local",
         "local": {
             "basePath": "./uploads"
+        },
+        "s3": {
+            "region": "",
+            "bucket": "",
+            "accessKey": "",
+            "secretKey": "",
+            "prefix": ""
+        },
+        "google": {
+            "bucket": "",
+            "credentialFile": "",
+            "prefix": ""
         }
     },
     "workers": {
@@ -761,21 +872,25 @@ deploy_remote() {
     "features": {
         "enableLAN": true,
         "enableProcessing": true,
-        "enableCloudStorage": true,
+        "enableCloudStorage": false,
         "enableProgressUpdates": true
+    },
+    "ssl": {
+        "enable": false,
+        "certFile": "",
+        "keyFile": ""
     }
 }
 EOF
-    fi
 
     echo -e "${YELLOW}[3] Creating deployment directory on VPS...${NC}"
-    ssh -i $SSH_KEY_PATH $VPS_USER@$VPS_HOST "sudo mkdir -p $APP_DIR && sudo chown $VPS_USER:$VPS_USER $APP_DIR && mkdir -p $APP_DIR/ui $APP_DIR/uploads $APP_DIR/logs"
+    ssh -i $SSH_KEY_PATH $VPS_USER@$VPS_HOST "sudo mkdir -p $APP_DIR && sudo mkdir -p $APP_DIR/logs && sudo chown $VPS_USER:$VPS_USER $APP_DIR && mkdir -p $APP_DIR/ui $APP_DIR/uploads"
 
     echo -e "${YELLOW}[4] Copying application files to VPS...${NC}"
-    scp -i $SSH_KEY_PATH fileprocessor fileprocessor.ini $VPS_USER@$VPS_HOST:$APP_DIR/
+    scp -i $SSH_KEY_PATH fileprocessor fileprocessor.json $VPS_USER@$VPS_HOST:$APP_DIR/
     scp -i $SSH_KEY_PATH -r ui/* $VPS_USER@$VPS_HOST:$APP_DIR/ui/
 
-    # Copy systemd service file
+    # Copy systemd service file with JSON config
     echo -e "${YELLOW}[5] Setting up systemd service on VPS...${NC}"
     cat > /tmp/fileprocessor.service << EOF
 [Unit]
@@ -786,12 +901,13 @@ After=network.target
 Type=simple
 User=$VPS_USER
 WorkingDirectory=$APP_DIR
-ExecStart=$APP_DIR/fileprocessor
+ExecStart=$APP_DIR/fileprocessor --config=$APP_DIR/fileprocessor.json
 Restart=always
 RestartSec=3
 StandardOutput=append:$APP_DIR/logs/output.log
 StandardError=append:$APP_DIR/logs/error.log
 Environment="PORT=$PORT"
+Environment="HOST=0.0.0.0"
 
 [Install]
 WantedBy=multi-user.target
@@ -804,6 +920,32 @@ EOF
 
     echo -e "${YELLOW}[7] Configuring and starting service...${NC}"
     ssh -i $SSH_KEY_PATH $VPS_USER@$VPS_HOST "sudo systemctl daemon-reload && sudo systemctl enable fileprocessor.service && sudo systemctl restart fileprocessor.service"
+
+    # Add a validation step to check if service started correctly
+    echo -e "${YELLOW}[8] Validating service status...${NC}"
+    IS_ACTIVE=$(ssh -i $SSH_KEY_PATH $VPS_USER@$VPS_HOST "systemctl is-active fileprocessor.service || echo 'inactive'")
+    
+    if [ "$IS_ACTIVE" == "active" ]; then
+        echo -e "   ${GREEN}✓${NC} Service started successfully"
+    else
+        echo -e "   ${RED}×${NC} Service failed to start"
+        echo -e "   Fetching error logs..."
+        
+        ssh -i $SSH_KEY_PATH $VPS_USER@$VPS_HOST "sudo journalctl -u fileprocessor.service -n 20 --no-pager"
+        echo -e "\n   Testing configuration directly..."
+        
+        # Try to run application directly to get better error information
+        ssh -i $SSH_KEY_PATH $VPS_USER@$VPS_HOST "cd $APP_DIR && $APP_DIR/fileprocessor --config=$APP_DIR/fileprocessor.json --test-config"
+        
+        echo -e "\n   Checking application logs..."
+        ssh -i $SSH_KEY_PATH $VPS_USER@$VPS_HOST "cat $APP_DIR/logs/error.log 2>/dev/null || echo 'No error log found'"
+        
+        echo -e "\n${RED}Service failed to start. Please check the logs above for details.${NC}"
+        echo -e "You can manually check logs on the VPS with these commands:"
+        echo -e "  ssh -i $SSH_KEY_PATH $VPS_USER@$VPS_HOST"
+        echo -e "  sudo journalctl -u fileprocessor.service -n 50"
+        echo -e "  cat $APP_DIR/logs/error.log"
+    fi
 
     echo -e "${YELLOW}[8] Setting up Nginx (if available)...${NC}"
     ssh -i $SSH_KEY_PATH $VPS_USER@$VPS_HOST "if command -v nginx &> /dev/null; then 
@@ -834,9 +976,6 @@ EOF'
         echo 'Nginx not installed on VPS'
     fi"
 
-    echo -e "${YELLOW}[9] Checking service status...${NC}"
-    ssh -i $SSH_KEY_PATH $VPS_USER@$VPS_HOST "sudo systemctl status fileprocessor.service || echo 'Service not started properly'"
-
     # Get the VPS public IP
     REMOTE_IP=$(ssh -i $SSH_KEY_PATH $VPS_USER@$VPS_HOST "curl -s http://checkip.amazonaws.com || hostname -I | awk '{print \$1}'")
     
@@ -850,6 +989,7 @@ EOF'
     echo -e "  - SSH into server: ssh -i $SSH_KEY_PATH $VPS_USER@$VPS_HOST"
     echo -e "  - Check status: sudo systemctl status fileprocessor"
     echo -e "  - View logs: sudo journalctl -u fileprocessor"
+    echo -e "  - Application logs: cat $APP_DIR/logs/error.log"
     echo -e "  - Restart service: sudo systemctl restart fileprocessor"
     echo -e "${BLUE}============================================${NC}"
 }

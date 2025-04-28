@@ -1,0 +1,45 @@
+{
+    "server": {
+        "port": 8080,
+        "uiDir": "./ui",
+        "uploadsDir": "./uploads",
+        "workerCount": 4,
+        "enableLan": true,
+        "shutdownTimeout": 30,
+        "host": "0.0.0.0"
+    },
+    "storage": {
+        "defaultProvider": "local",
+        "local": {
+            "basePath": "./uploads"
+        },
+        "s3": {
+            "region": "",
+            "bucket": "",
+            "accessKey": "",
+            "secretKey": "",
+            "prefix": ""
+        },
+        "google": {
+            "bucket": "",
+            "credentialFile": "",
+            "prefix": ""
+        }
+    },
+    "workers": {
+        "count": 4,
+        "queueSize": 100,
+        "maxAttempts": 3
+    },
+    "features": {
+        "enableLAN": true,
+        "enableProcessing": true,
+        "enableCloudStorage": false,
+        "enableProgressUpdates": true
+    },
+    "ssl": {
+        "enable": false,
+        "certFile": "",
+        "keyFile": ""
+    }
+}
