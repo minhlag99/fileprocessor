@@ -43,8 +43,8 @@ if [[ "$OS_TYPE" == "windows" ]]; then
 fi
 SERVICE_NAME=${SERVICE_NAME:-"$APP_NAME.service"}
 USER=${USER:-"$(whoami)"}
-PORT=${PORT:-8080}
-ALTERNATE_PORT=${ALTERNATE_PORT:-9090}
+PORT=${PORT:-9000}
+ALTERNATE_PORT=${ALTERNATE_PORT:-9001}
 LATEST_GO_VERSION="1.24.2"
 
 # Remote deployment variables (only used in remote mode)
