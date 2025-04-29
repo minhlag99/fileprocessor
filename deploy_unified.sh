@@ -149,6 +149,8 @@ setup_remote_config() {
 
 # Function for all local deployment steps
 deploy_local() {
+    ensure_dependencies_installed
+    check_port_in_use
     # Configure port
     configure_ports
     
@@ -192,11 +194,14 @@ deploy_local() {
     fi
     
     run_network_diagnostics
+    public_connectivity_test
     display_connection_info
 }
 
 # Function for direct server deployment (when SSH is not used)
 deploy_direct_server() {
+    ensure_dependencies_installed
+    check_port_in_use
     # Configure port
     configure_ports
     
@@ -224,6 +229,7 @@ deploy_direct_server() {
     
     start_application
     run_network_diagnostics
+    public_connectivity_test
     display_connection_info
 }
 
@@ -992,6 +998,53 @@ EOF'
     echo -e "  - Application logs: cat $APP_DIR/logs/error.log"
     echo -e "  - Restart service: sudo systemctl restart fileprocessor"
     echo -e "${BLUE}============================================${NC}"
+}
+
+# Function to ensure all required dependencies are installed
+ensure_dependencies_installed() {
+    echo -e "${YELLOW}[*] Ensuring all required dependencies are installed...${NC}"
+    sudo apt-get update
+    for pkg in curl wget ufw nginx lsof net-tools; do
+        if ! dpkg -s $pkg &> /dev/null; then
+            echo -e "   Installing $pkg..."
+            sudo apt-get install -y $pkg
+        else
+            echo -e "   ${GREEN}✓${NC} $pkg already installed"
+        fi
+    done
+}
+
+# Function to check if port is in use and prompt for alternative
+check_port_in_use() {
+    if sudo lsof -i :$PORT | grep LISTEN &> /dev/null; then
+        echo -e "${RED}Port $PORT is already in use.${NC}"
+        read -p "Enter a different port (1024-65535) [default: $ALTERNATE_PORT]: " new_port
+        if [[ ! -z "$new_port" && "$new_port" =~ ^[0-9]+$ && "$new_port" -ge 1024 && "$new_port" -le 65535 ]]; then
+            PORT=$new_port
+            echo -e "${GREEN}Port set to: $PORT${NC}"
+        else
+            PORT=$ALTERNATE_PORT
+            echo -e "${GREEN}Port set to alternate: $PORT${NC}"
+        fi
+    fi
+}
+
+# Function to test public internet connectivity to the app
+public_connectivity_test() {
+    echo -e "${YELLOW}[11] Testing public internet connectivity...${NC}"
+    PUBLIC_IP=$(curl -s https://api.ipify.org || curl -s http://checkip.amazonaws.com || echo "Could not determine")
+    if [ "$PUBLIC_IP" = "Could not determine" ]; then
+        echo -e "${RED}Could not determine public IP. Skipping public connectivity test.${NC}"
+        return
+    fi
+    sleep 3
+    HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://$PUBLIC_IP:$PORT/health || echo "Failed")
+    if [ "$HTTP_STATUS" = "200" ]; then
+        echo -e "${GREEN}✓ Application is reachable from the internet at http://$PUBLIC_IP:$PORT/health${NC}"
+    else
+        echo -e "${RED}✗ Application is NOT reachable from the internet at http://$PUBLIC_IP:$PORT/health (HTTP $HTTP_STATUS)${NC}"
+        echo -e "Check firewall, VPS provider rules, and Nginx config."
+    fi
 }
 
 # Start by selecting deployment mode
