@@ -1016,7 +1016,24 @@ ensure_dependencies_installed() {
 
 # Function to check if port is in use and prompt for alternative
 check_port_in_use() {
-    if sudo lsof -i :$PORT | grep LISTEN &> /dev/null; then
+    # Try multiple methods to check for port usage
+    PORT_IN_USE=false
+    
+    if command -v lsof &> /dev/null; then
+        if lsof -i :$PORT | grep LISTEN &> /dev/null; then
+            PORT_IN_USE=true
+        fi
+    elif command -v ss &> /dev/null; then
+        if ss -tulpn | grep ":$PORT " &> /dev/null; then
+            PORT_IN_USE=true
+        fi
+    elif command -v netstat &> /dev/null; then
+        if netstat -tulpn | grep ":$PORT " &> /dev/null; then
+            PORT_IN_USE=true
+        fi
+    fi
+    
+    if [ "$PORT_IN_USE" = true ]; then
         echo -e "${RED}Port $PORT is already in use.${NC}"
         read -p "Enter a different port (1024-65535) [default: $ALTERNATE_PORT]: " new_port
         if [[ ! -z "$new_port" && "$new_port" =~ ^[0-9]+$ && "$new_port" -ge 1024 && "$new_port" -le 65535 ]]; then
@@ -1026,6 +1043,8 @@ check_port_in_use() {
             PORT=$ALTERNATE_PORT
             echo -e "${GREEN}Port set to alternate: $PORT${NC}"
         fi
+    else
+        echo -e "${GREEN}Port $PORT is available.${NC}"
     fi
 }
 

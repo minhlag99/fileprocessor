@@ -1,4 +1,4 @@
-module fileprocessor
+module github.com/example/fileprocessor
 
 go 1.24.2
 
@@ -7,6 +7,7 @@ require (
 	github.com/aws/aws-sdk-go v1.55.7
 	github.com/gorilla/websocket v1.5.3
 	github.com/unidoc/unioffice v1.39.0
+	golang.org/x/oauth2 v0.29.0
 	google.golang.org/api v0.230.0
 )
 
@@ -49,7 +50,6 @@ require (
 	go.opentelemetry.io/otel/trace v1.35.0 // indirect
 	golang.org/x/crypto v0.37.0 // indirect
 	golang.org/x/net v0.39.0 // indirect
-	golang.org/x/oauth2 v0.29.0 // indirect
 	golang.org/x/sync v0.13.0 // indirect
 	golang.org/x/sys v0.32.0 // indirect
 	golang.org/x/text v0.24.0 // indirect

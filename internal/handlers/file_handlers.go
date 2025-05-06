@@ -11,9 +11,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"fileprocessor/internal/models"
-	"fileprocessor/internal/processors"
-	"fileprocessor/internal/storage"
+	"github.com/example/fileprocessor/internal/models"
+	"github.com/example/fileprocessor/internal/processors"
+	"github.com/example/fileprocessor/internal/storage"
 )
 
 // FileHandler handles file operations
@@ -37,11 +37,11 @@ func NewFileHandler() (*FileHandler, error) {
 		storageFactory: storage.DefaultFactory,
 		defaultStorage: defaultStorage,
 	}
-	
+
 	// Try initializing cloud providers with empty configs to check if they're available
 	// This helps identify issues early rather than when the user tries to use them
 	handler.testCloudProviderAvailability()
-	
+
 	return handler, nil
 }
 
@@ -54,7 +54,7 @@ func (h *FileHandler) testCloudProviderAvailability() {
 		log.Printf("Google Cloud Storage will be unavailable: %v", err)
 		// Error already marked the provider as unavailable in the factory
 	}
-	
+
 	// Test Amazon S3 availability
 	_, err = storage.CreateProvider("s3", map[string]string{})
 	if err != nil {
@@ -69,32 +69,32 @@ func (h *FileHandler) GetStorageProviderStatus(w http.ResponseWriter, r *http.Re
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	
+
 	// Get status for each provider type
 	localAvailable, localReason := storage.IsProviderAvailable("local")
 	s3Available, s3Reason := storage.IsProviderAvailable("s3")
 	googleAvailable, googleReason := storage.IsProviderAvailable("google")
-	
+
 	status := map[string]interface{}{
 		"local": map[string]interface{}{
 			"available": localAvailable,
-			"reason": localReason,
+			"reason":    localReason,
 		},
 		"s3": map[string]interface{}{
 			"available": s3Available,
-			"reason": s3Reason,
+			"reason":    s3Reason,
 		},
 		"google": map[string]interface{}{
 			"available": googleAvailable,
-			"reason": googleReason,
+			"reason":    googleReason,
 		},
 	}
-	
+
 	response := models.APIResponse{
 		Success: true,
 		Data:    status,
 	}
-	
+
 	sendJSONResponse(w, response, http.StatusOK)
 }
 
@@ -184,7 +184,7 @@ func (h *FileHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 	if processFile {
 		// Create a task ID for tracking
 		taskID := fmt.Sprintf("process-%s-%d", id, time.Now().UnixNano())
-		
+
 		// Create a task function
 		processFn := func() (*processors.ProcessResult, error) {
 			// Get file content
@@ -210,7 +210,7 @@ func (h *FileHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 			// Send processing started notification via WebSocket
 			DefaultWebSocketHub.Broadcast("processing_started", map[string]interface{}{
 				"taskId": taskID,
-				"file": fileModel,
+				"file":   fileModel,
 			})
 
 			// Report progress updates
@@ -218,14 +218,14 @@ func (h *FileHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 				progress := 0
 				ticker := time.NewTicker(500 * time.Millisecond)
 				defer ticker.Stop()
-				
+
 				for progress < 90 {
 					select {
 					case <-ticker.C:
 						progress += 10
 						DefaultWebSocketHub.SendTaskUpdate(taskID, "processing_progress", map[string]interface{}{
 							"progress": progress,
-							"file": fileModel,
+							"file":     fileModel,
 						})
 					case <-r.Context().Done():
 						return
@@ -235,27 +235,27 @@ func (h *FileHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 
 			// Do the actual processing
 			result, err := processor.Process(r.Context(), reader, fileModel.Name, options)
-			
+
 			// Send completion notification via WebSocket
 			if err != nil {
 				DefaultWebSocketHub.SendTaskUpdate(taskID, "processing_failed", map[string]interface{}{
 					"error": err.Error(),
-					"file": fileModel,
+					"file":  fileModel,
 				})
 			} else {
 				DefaultWebSocketHub.SendTaskUpdate(taskID, "processing_completed", map[string]interface{}{
-					"file": fileModel,
+					"file":    fileModel,
 					"summary": result.Summary,
 				})
 			}
-			
+
 			return result, err
 		}
 
 		// Create and submit the task
 		task := processors.NewTask(taskID, processFn)
 		processors.Submit(task)
-		
+
 		// Wait briefly for quick tasks to complete
 		select {
 		case result := <-task.Result:
@@ -271,7 +271,7 @@ func (h *FileHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 				Success: true,
 				Message: "File uploaded successfully. Processing in background.",
 				Data: map[string]interface{}{
-					"file": fileModel,
+					"file":   fileModel,
 					"taskId": taskID,
 					"status": "processing",
 				},
@@ -314,7 +314,7 @@ func (h *FileHandler) DownloadFile(w http.ResponseWriter, r *http.Request) {
 	if storageType == "" {
 		storageType = "local"
 	}
-	
+
 	// Check if the requested storage provider is available
 	if storageType != "local" {
 		available, reason := storage.IsProviderAvailable(storageType)
@@ -381,7 +381,7 @@ func (h *FileHandler) ListFiles(w http.ResponseWriter, r *http.Request) {
 	if storageType == "" {
 		storageType = "local"
 	}
-	
+
 	// Check if the requested storage provider is available
 	if storageType != "local" {
 		available, reason := storage.IsProviderAvailable(storageType)
@@ -469,7 +469,7 @@ func (h *FileHandler) GetSignedURL(w http.ResponseWriter, r *http.Request) {
 	if storageType == "" {
 		storageType = "local"
 	}
-	
+
 	// Check if the requested storage provider is available
 	if storageType != "local" {
 		available, reason := storage.IsProviderAvailable(storageType)
@@ -543,7 +543,7 @@ func (h *FileHandler) DeleteFile(w http.ResponseWriter, r *http.Request) {
 	if storageType == "" {
 		storageType = "local"
 	}
-	
+
 	// Check if the requested storage provider is available
 	if storageType != "local" {
 		available, reason := storage.IsProviderAvailable(storageType)

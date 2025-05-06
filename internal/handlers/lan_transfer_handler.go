@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"fileprocessor/internal/models"
+	"github.com/example/fileprocessor/internal/models"
 )
 
 // LANTransferHandler handles peer-to-peer file transfers over the local network

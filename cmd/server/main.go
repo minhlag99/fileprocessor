@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -13,16 +14,54 @@ import (
 	"syscall"
 	"time"
 
-	"fileprocessor/internal/config"
-	"fileprocessor/internal/handlers"
-	"fileprocessor/internal/middleware"
-	"fileprocessor/internal/processors"
+	"github.com/example/fileprocessor/internal/auth"
+	"github.com/example/fileprocessor/internal/config"
+	"github.com/example/fileprocessor/internal/handlers"
+	"github.com/example/fileprocessor/internal/middleware"
+	"github.com/example/fileprocessor/internal/processors"
 )
 
 var (
 	configFile = flag.String("config", "fileprocessor.ini", "Configuration file path")
-	version    = "1.2.0"  // Version number for the application
+	testConfig = flag.Bool("test-config", false, "Test configuration and exit")
+	verbose    = flag.Bool("verbose", false, "Enable verbose logging")
+	version    = "1.3.0" // Version number for the application
 )
+
+// isPortInUse checks if the given port is already in use
+func isPortInUse(port int) bool {
+	addr := fmt.Sprintf(":%d", port)
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		// Port is likely in use
+		return true
+	}
+	// Close the listener and return false to indicate port is available
+	listener.Close()
+	return false
+}
+
+// findFreePort tries to find a free port starting from the given port
+// and incrementing by 1 if the port is in use. Stops searching after
+// trying 100 ports or reaching port 65535.
+func findFreePort(startPort int) int {
+	port := startPort
+	maxPortToTry := startPort + 100
+	if maxPortToTry > 65535 {
+		maxPortToTry = 65535
+	}
+
+	for port <= maxPortToTry {
+		if !isPortInUse(port) {
+			return port
+		}
+		port++
+	}
+
+	// If no free port found in the range, return the original port
+	// (will still fail when the server tries to start)
+	return startPort
+}
 
 func main() {
 	// Parse command line flags
@@ -33,6 +72,12 @@ func main() {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
 
+	// Test configuration if requested
+	if *testConfig {
+		fmt.Println("Configuration test successful")
+		return
+	}
+
 	// Print banner and version
 	fmt.Printf("\n=================================\n")
 	fmt.Printf("File Management System v%s\n", version)
@@ -41,7 +86,10 @@ func main() {
 	if config.AppConfig.Features.EnableLAN {
 		fmt.Printf("LAN file transfer capabilities enabled\n")
 	}
-	
+	if config.AppConfig.Features.EnableAuth {
+		fmt.Printf("Authentication enabled\n")
+	}
+
 	// Initialize worker pool with configured number of workers
 	log.Printf("Initializing worker pool with %d workers", config.AppConfig.Workers.Count)
 	processors.InitializeWorkerPool(config.AppConfig.Workers.Count, config.AppConfig.Workers.QueueSize)
@@ -69,9 +117,39 @@ func main() {
 		}
 	}
 
+	// Initialize authentication if enabled
+	var authHandler *auth.AuthHandler
+	if config.AppConfig.Features.EnableAuth {
+		log.Println("Initializing authentication system")
+
+		// Get base URL for OAuth redirect
+		redirectURL := config.AppConfig.Auth.OAuthRedirectURL
+		if redirectURL == "" {
+			// Auto-configure redirect URL based on host and port
+			proto := "http"
+			if config.AppConfig.Server.CertFile != "" && config.AppConfig.Server.KeyFile != "" {
+				proto = "https"
+			}
+			redirectURL = fmt.Sprintf("%s://%s:%d/api/auth/callback",
+				proto,
+				config.AppConfig.Server.Host,
+				config.AppConfig.Server.Port)
+		}
+
+		// Initialize auth system
+		auth.Init(
+			config.AppConfig.Auth.GoogleClientID,
+			config.AppConfig.Auth.GoogleClientSecret,
+			redirectURL,
+		)
+
+		authHandler = auth.DefaultAuthHandler
+		log.Printf("OAuth redirects configured to: %s", redirectURL)
+	}
+
 	// Create router with middleware
 	mux := http.NewServeMux()
-	
+
 	// Add middleware
 	handler := middleware.Chain(
 		mux,
@@ -107,9 +185,18 @@ func main() {
 		mux.HandleFunc("/api/lan/status", lanHandler.HandleTransferStatus)
 	}
 
+	// Auth routes if enabled
+	if config.AppConfig.Features.EnableAuth {
+		mux.HandleFunc("/api/auth/login", authHandler.HandleLogin)
+		mux.HandleFunc("/api/auth/callback", authHandler.HandleCallback)
+		mux.HandleFunc("/api/auth/profile", authHandler.HandleProfile)
+		mux.HandleFunc("/api/auth/logout", authHandler.HandleLogout)
+		mux.HandleFunc("/api/auth/cloud-config", authHandler.HandleCloudConfig)
+	}
+
 	// Special handler for workflow.gif
 	mux.HandleFunc("/workflow.gif", func(w http.ResponseWriter, r *http.Request) {
-		// For demonstration purposes, we'll serve the workflow HTML page 
+		// For demonstration purposes, we'll serve the workflow HTML page
 		// which animates the workflow process
 		w.Header().Set("Content-Type", "text/html")
 		http.ServeFile(w, r, filepath.Join(config.AppConfig.Server.UIDir, "images/workflow.html"))
@@ -125,6 +212,14 @@ func main() {
 		Handler: handler,
 	}
 
+	// Verify that we're binding to the right addresses for external access
+	log.Printf("Server will be accessible at %s", addr)
+	if config.AppConfig.Server.Host == "0.0.0.0" || config.AppConfig.Server.Host == "" {
+		log.Printf("Binding to all network interfaces (0.0.0.0)")
+	} else {
+		log.Printf("Warning: Binding only to %s, which may prevent external access", config.AppConfig.Server.Host)
+	}
+
 	// Channel to listen for interrupt signals
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
@@ -136,11 +231,11 @@ func main() {
 		var err error
 		if config.AppConfig.Server.CertFile != "" && config.AppConfig.Server.KeyFile != "" {
 			// HTTPS server
-			log.Printf("Using TLS with cert file %s and key file %s", 
-				config.AppConfig.Server.CertFile, 
+			log.Printf("Using TLS with cert file %s and key file %s",
+				config.AppConfig.Server.CertFile,
 				config.AppConfig.Server.KeyFile)
 			err = server.ListenAndServeTLS(
-				config.AppConfig.Server.CertFile, 
+				config.AppConfig.Server.CertFile,
 				config.AppConfig.Server.KeyFile)
 		} else {
 			// HTTP server
@@ -158,7 +253,7 @@ func main() {
 
 	// Create context with timeout for graceful shutdown
 	ctx, cancel := context.WithTimeout(
-		context.Background(), 
+		context.Background(),
 		time.Duration(config.AppConfig.Server.ShutdownTimeout)*time.Second)
 	defer cancel()
 

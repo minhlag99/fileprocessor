@@ -6,7 +6,8 @@
         "workerCount": 4,
         "enableLan": true,
         "shutdownTimeout": 30,
-        "host": "0.0.0.0"
+        "host": "0.0.0.0",
+        "allowedOrigins": "*"
     },
     "storage": {
         "defaultProvider": "local",
@@ -34,8 +35,14 @@
     "features": {
         "enableLAN": true,
         "enableProcessing": true,
-        "enableCloudStorage": false,
-        "enableProgressUpdates": true
+        "enableCloudStorage": true,
+        "enableProgressUpdates": true,
+        "enableAuth": true
+    },
+    "auth": {
+        "googleClientID": "",
+        "googleClientSecret": "",
+        "oauthRedirectURL": ""
     },
     "ssl": {
         "enable": false,

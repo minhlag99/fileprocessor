@@ -16,6 +16,7 @@ type Config struct {
 	Storage  StorageConfig `json:"storage"`
 	Workers  WorkerConfig  `json:"workers"`
 	Features FeatureConfig `json:"features"`
+	Auth     AuthConfig    `json:"auth"`
 }
 
 // ServerConfig contains server-related configuration
@@ -51,6 +52,14 @@ type FeatureConfig struct {
 	EnableProcessing      bool `json:"enableProcessing"`
 	EnableCloudStorage    bool `json:"enableCloudStorage"`
 	EnableProgressUpdates bool `json:"enableProgressUpdates"`
+	EnableAuth            bool `json:"enableAuth"`
+}
+
+// AuthConfig contains authentication configuration
+type AuthConfig struct {
+	GoogleClientID     string `json:"googleClientID"`
+	GoogleClientSecret string `json:"googleClientSecret"`
+	OAuthRedirectURL   string `json:"oauthRedirectURL"`
 }
 
 // AppConfig is the global application configuration
@@ -81,6 +90,10 @@ func LoadConfig(configFile string) error {
 			EnableProcessing:      true,
 			EnableCloudStorage:    true,
 			EnableProgressUpdates: true,
+			EnableAuth:            false,
+		},
+		Auth: AuthConfig{
+			OAuthRedirectURL: "http://localhost:8080/api/auth/callback",
 		},
 	}
 
@@ -148,6 +161,23 @@ func overrideWithEnv() {
 	// Feature flags
 	if enableLAN := os.Getenv("FP_ENABLE_LAN"); enableLAN != "" {
 		AppConfig.Features.EnableLAN = enableLAN == "true" || enableLAN == "1"
+	}
+
+	if enableAuth := os.Getenv("FP_ENABLE_AUTH"); enableAuth != "" {
+		AppConfig.Features.EnableAuth = enableAuth == "true" || enableAuth == "1"
+	}
+
+	// Auth config
+	if clientID := os.Getenv("FP_GOOGLE_CLIENT_ID"); clientID != "" {
+		AppConfig.Auth.GoogleClientID = clientID
+	}
+
+	if clientSecret := os.Getenv("FP_GOOGLE_CLIENT_SECRET"); clientSecret != "" {
+		AppConfig.Auth.GoogleClientSecret = clientSecret
+	}
+
+	if redirectURL := os.Getenv("FP_OAUTH_REDIRECT_URL"); redirectURL != "" {
+		AppConfig.Auth.OAuthRedirectURL = redirectURL
 	}
 }
 
