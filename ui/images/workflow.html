@@ -1,17 +1,23 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>File Processing Workflow</title>
   <style>
     body {
       font-family: Arial, sans-serif;
       background-color: white;
       padding: 20px;
+      margin: 0;
+    }
+    .container {
+      max-width: 1000px;
+      margin: 0 auto;
     }
     .workflow {
-      width: 800px;
-      height: 400px;
+      width: 100%;
+      height: 450px;
       position: relative;
       margin: 0 auto;
       border: 1px solid #ddd;
@@ -147,71 +153,166 @@
       background-color: #198754;
       color: white;
     }
+    .controls {
+      display: flex;
+      justify-content: center;
+      margin-top: 20px;
+      gap: 10px;
+    }
+    .btn {
+      padding: 8px 16px;
+      background-color: #0d6efd;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: background-color 0.3s;
+    }
+    .btn:hover {
+      background-color: #0a58ca;
+    }
+    .btn:focus {
+      outline: 3px solid rgba(13, 110, 253, 0.25);
+    }
+    .btn-pause {
+      background-color: #6c757d;
+    }
+    .btn-pause:hover {
+      background-color: #5a6268;
+    }
+    .legend {
+      margin-top: 15px;
+      display: flex;
+      justify-content: center;
+      gap: 20px;
+      font-size: 0.9rem;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .legend-color {
+      width: 15px;
+      height: 15px;
+      border-radius: 3px;
+    }
+    .legend-upload { background-color: #0d6efd; }
+    .legend-result { background-color: #198754; }
+    
+    @media (max-width: 900px) {
+      .workflow {
+        height: 600px;
+      }
+      .step {
+        width: 150px;
+      }
+      /* Adjust positions for mobile */
+      #step1 { top: 30px; left: 20px; }
+      #step2 { top: 30px; left: 200px; }
+      #step3 { top: 160px; left: 200px; }
+      #step4 { top: 160px; left: 380px; }
+      #step5 { top: 30px; left: 380px; }
+      #lan-transfer { top: 290px; left: 20px; }
+      #threads { top: 290px; left: 200px; }
+      #result { top: 290px; left: 380px; }
+      
+      .arrow {
+        width: 50px !important;
+      }
+      #arrow1 { top: 80px; left: 170px; }
+      #arrow2 { top: 130px; left: 200px; }
+      #arrow3 { top: 190px; left: 350px; }
+      #arrow4 { top: 130px; left: 380px; }
+      #arrow5 { top: 80px; left: 350px; }
+      #arrow6 { top: 240px; left: 90px; }
+    }
   </style>
 </head>
 <body>
-  <div class="workflow" id="workflow">
-    <!-- Steps -->
-    <div class="step" id="step1" style="top: 50px; left: 40px;">
-      <div class="step-title">Client Upload</div>
-      <div class="step-desc">User uploads file via browser</div>
+  <div class="container">
+    <h1>File Processing Workflow</h1>
+    
+    <div class="workflow" id="workflow">
+      <!-- Steps -->
+      <div class="step" id="step1" style="top: 50px; left: 40px;" aria-label="Step 1: Client Upload">
+        <div class="step-title">Client Upload</div>
+        <div class="step-desc">User uploads file via browser</div>
+      </div>
+      
+      <div class="step" id="step2" style="top: 50px; left: 300px;" aria-label="Step 2: File Storage">
+        <div class="step-title">File Storage</div>
+        <div class="step-desc">Local, S3, or Google Cloud</div>
+      </div>
+      
+      <div class="step" id="step3" style="top: 200px; left: 300px;" aria-label="Step 3: File Processing">
+        <div class="step-title">File Processing</div>
+        <div class="step-desc">Multi-threaded processing</div>
+      </div>
+      
+      <div class="step" id="step4" style="top: 200px; left: 580px;" aria-label="Step 4: WebSocket Updates">
+        <div class="step-title">WebSocket Updates</div>
+        <div class="step-desc">Real-time status updates</div>
+      </div>
+      
+      <div class="step" id="step5" style="top: 50px; left: 580px;" aria-label="Step 5: Result Storage">
+        <div class="step-title">Result Storage</div>
+        <div class="step-desc">Processed data & metadata</div>
+      </div>
+      
+      <!-- LAN Transfer Element -->
+      <div class="lan-transfer" id="lan-transfer" style="top: 280px; left: 40px;">
+        <div class="step-title">LAN File Transfer</div>
+        <div class="step-desc">Direct peer-to-peer sharing</div>
+      </div>
+      
+      <!-- Thread Workers -->
+      <div class="threads" id="threads" style="top: 310px; left: 320px;" aria-label="Processing threads">
+        <div class="thread"></div>
+        <div class="thread"></div>
+        <div class="thread"></div>
+        <div class="thread"></div>
+      </div>
+      
+      <!-- Result -->
+      <div class="result" id="result" style="top: 280px; left: 580px;" aria-label="Download and Preview Result">
+        <div class="step-title">Download / Preview</div>
+        <div class="step-desc">View processed files</div>
+      </div>
+      
+      <!-- Arrows -->
+      <div class="arrow" id="arrow1" style="width: 80px; top: 100px; left: 220px;"></div>
+      <div class="arrow" id="arrow2" style="width: 80px; top: 150px; left: 300px; transform: rotate(90deg);"></div>
+      <div class="arrow" id="arrow3" style="width: 80px; top: 230px; left: 480px;"></div>
+      <div class="arrow" id="arrow4" style="width: 80px; top: 150px; left: 580px; transform: rotate(-90deg);"></div>
+      <div class="arrow" id="arrow5" style="width: 80px; top: 100px; left: 480px;"></div>
+      <div class="arrow" id="arrow6" style="width: 80px; top: 280px; left: 140px; transform: rotate(90deg);"></div>
+      
+      <!-- File icon for animation -->
+      <div class="file-icon" id="file-icon" aria-label="File being processed"></div>
     </div>
     
-    <div class="step" id="step2" style="top: 50px; left: 300px;">
-      <div class="step-title">File Storage</div>
-      <div class="step-desc">Local, S3, or Google Cloud</div>
+    <div class="controls">
+      <button id="playBtn" class="btn" aria-label="Play animation">Play</button>
+      <button id="pauseBtn" class="btn btn-pause" aria-label="Pause animation">Pause</button>
+      <button id="resetBtn" class="btn" aria-label="Reset animation">Reset</button>
     </div>
     
-    <div class="step" id="step3" style="top: 200px; left: 300px;">
-      <div class="step-title">File Processing</div>
-      <div class="step-desc">Multi-threaded processing</div>
+    <div class="legend">
+      <div class="legend-item">
+        <span class="legend-color legend-upload"></span>
+        <span>Processing Steps</span>
+      </div>
+      <div class="legend-item">
+        <span class="legend-color legend-result"></span>
+        <span>Results</span>
+      </div>
     </div>
-    
-    <div class="step" id="step4" style="top: 200px; left: 580px;">
-      <div class="step-title">WebSocket Updates</div>
-      <div class="step-desc">Real-time status updates</div>
-    </div>
-    
-    <div class="step" id="step5" style="top: 50px; left: 580px;">
-      <div class="step-title">Result Storage</div>
-      <div class="step-desc">Processed data & metadata</div>
-    </div>
-    
-    <!-- LAN Transfer Element -->
-    <div class="lan-transfer" id="lan-transfer" style="top: 280px; left: 40px;">
-      <div class="step-title">LAN File Transfer</div>
-      <div class="step-desc">Direct peer-to-peer sharing</div>
-    </div>
-    
-    <!-- Thread Workers -->
-    <div class="threads" id="threads" style="top: 310px; left: 320px;">
-      <div class="thread"></div>
-      <div class="thread"></div>
-      <div class="thread"></div>
-      <div class="thread"></div>
-    </div>
-    
-    <!-- Result -->
-    <div class="result" id="result" style="top: 280px; left: 580px;">
-      <div class="step-title">Download / Preview</div>
-      <div class="step-desc">View processed files</div>
-    </div>
-    
-    <!-- Arrows -->
-    <div class="arrow" id="arrow1" style="width: 80px; top: 100px; left: 220px;"></div>
-    <div class="arrow" id="arrow2" style="width: 80px; top: 150px; left: 300px; transform: rotate(90deg);"></div>
-    <div class="arrow" id="arrow3" style="width: 80px; top: 230px; left: 480px;"></div>
-    <div class="arrow" id="arrow4" style="width: 80px; top: 150px; left: 580px; transform: rotate(-90deg);"></div>
-    <div class="arrow" id="arrow5" style="width: 80px; top: 100px; left: 480px;"></div>
-    <div class="arrow" id="arrow6" style="width: 80px; top: 280px; left: 140px; transform: rotate(90deg);"></div>
-    
-    <!-- File icon for animation -->
-    <div class="file-icon" id="file-icon"></div>
   </div>
 
   <script>
     // Animation sequence for the workflow
-    const animateWorkflow = () => {
+    document.addEventListener('DOMContentLoaded', () => {
       const file = document.getElementById('file-icon');
       const steps = Array.from(document.querySelectorAll('.step'));
       const arrows = Array.from(document.querySelectorAll('.arrow'));
@@ -219,88 +320,141 @@
       const lanTransfer = document.getElementById('lan-transfer');
       const result = document.getElementById('result');
       
-      // Reset all elements
-      steps.forEach(step => step.classList.remove('active', 'highlight'));
-      arrows.forEach(arrow => arrow.style.opacity = '0');
-      file.style.opacity = '0';
-      file.style.top = '75px';
-      file.style.left = '10px';
-      threads.style.opacity = '0';
-      lanTransfer.style.opacity = '0';
-      result.classList.remove('active');
+      const playBtn = document.getElementById('playBtn');
+      const pauseBtn = document.getElementById('pauseBtn');
+      const resetBtn = document.getElementById('resetBtn');
       
-      // Start animation sequence
-      setTimeout(() => {
-        file.style.opacity = '1'; // Show file
-        steps[0].classList.add('active'); // Highlight Client Upload step
-      }, 500);
+      let animationTimeouts = [];
+      let isPlaying = false;
       
-      setTimeout(() => {
-        file.style.left = '250px'; // Move file to storage
-        arrows[0].style.opacity = '1'; // Show first arrow
-      }, 1500);
+      // Function to clear all timeouts
+      const clearAnimationTimeouts = () => {
+        animationTimeouts.forEach(timeoutId => clearTimeout(timeoutId));
+        animationTimeouts = [];
+      };
       
-      setTimeout(() => {
-        steps[0].classList.remove('active');
-        steps[1].classList.add('active'); // Highlight Storage step
-      }, 2500);
+      // Reset all elements to initial state
+      const resetAnimation = () => {
+        clearAnimationTimeouts();
+        steps.forEach(step => step.classList.remove('active', 'highlight'));
+        arrows.forEach(arrow => arrow.style.opacity = '0');
+        file.style.opacity = '0';
+        file.style.top = '75px';
+        file.style.left = '10px';
+        threads.style.opacity = '0';
+        lanTransfer.style.opacity = '0';
+        result.classList.remove('active');
+        isPlaying = false;
+      };
       
-      setTimeout(() => {
-        file.style.top = '225px'; // Move file to processing
-        arrows[1].style.opacity = '1'; // Show second arrow
-      }, 3500);
-      
-      setTimeout(() => {
-        steps[1].classList.remove('active');
-        steps[2].classList.add('active'); // Highlight Processing step
-        threads.style.opacity = '1'; // Show thread workers
-      }, 4500);
-      
-      setTimeout(() => {
-        arrows[2].style.opacity = '1'; // Show third arrow
-        file.style.left = '550px'; // Move file to websocket
-      }, 5500);
-      
-      setTimeout(() => {
-        steps[2].classList.remove('active');
-        steps[3].classList.add('active'); // Highlight WebSocket step
-      }, 6500);
-      
-      setTimeout(() => {
-        file.style.top = '75px'; // Move file to results
-        arrows[3].style.opacity = '1'; // Show fourth arrow
-      }, 7500);
-      
-      setTimeout(() => {
-        steps[3].classList.remove('active');
-        steps[4].classList.add('active'); // Highlight Results step
-      }, 8500);
-      
-      setTimeout(() => {
-        arrows[4].style.opacity = '1'; // Show fifth arrow
-        file.style.opacity = '0'; // Hide the file
-      }, 9500);
-      
-      // Show LAN transfer in parallel
-      setTimeout(() => {
-        lanTransfer.style.opacity = '1'; // Show LAN transfer option
-        arrows[5].style.opacity = '1'; // Show connection to the upload step
-      }, 10500);
-      
-      // Final result showing
-      setTimeout(() => {
-        steps[4].classList.remove('active');
-        result.classList.add('active'); // Highlight Result
+      // Animation sequence
+      const startAnimation = () => {
+        if (isPlaying) return;
         
-        // Reset and loop the animation
-        setTimeout(() => animateWorkflow(), 2000);
-      }, 11500);
-    };
-    
-    // Start the animation when the page loads
-    window.onload = () => {
-      animateWorkflow();
-    };
+        isPlaying = true;
+        resetAnimation();
+        
+        // Helper function to add timeout and keep track of it
+        const addTimeout = (callback, delay) => {
+          const timeoutId = setTimeout(callback, delay);
+          animationTimeouts.push(timeoutId);
+          return timeoutId;
+        };
+        
+        // Start animation sequence
+        addTimeout(() => {
+          file.style.opacity = '1'; // Show file
+          steps[0].classList.add('active'); // Highlight Client Upload step
+        }, 500);
+        
+        addTimeout(() => {
+          file.style.left = '250px'; // Move file to storage
+          arrows[0].style.opacity = '1'; // Show first arrow
+        }, 1500);
+        
+        addTimeout(() => {
+          steps[0].classList.remove('active');
+          steps[1].classList.add('active'); // Highlight Storage step
+        }, 2500);
+        
+        addTimeout(() => {
+          file.style.top = '225px'; // Move file to processing
+          arrows[1].style.opacity = '1'; // Show second arrow
+        }, 3500);
+        
+        addTimeout(() => {
+          steps[1].classList.remove('active');
+          steps[2].classList.add('active'); // Highlight Processing step
+          threads.style.opacity = '1'; // Show thread workers
+        }, 4500);
+        
+        addTimeout(() => {
+          arrows[2].style.opacity = '1'; // Show third arrow
+          file.style.left = '550px'; // Move file to websocket
+        }, 5500);
+        
+        addTimeout(() => {
+          steps[2].classList.remove('active');
+          steps[3].classList.add('active'); // Highlight WebSocket step
+        }, 6500);
+        
+        addTimeout(() => {
+          file.style.top = '75px'; // Move file to results
+          arrows[3].style.opacity = '1'; // Show fourth arrow
+        }, 7500);
+        
+        addTimeout(() => {
+          steps[3].classList.remove('active');
+          steps[4].classList.add('active'); // Highlight Results step
+        }, 8500);
+        
+        addTimeout(() => {
+          arrows[4].style.opacity = '1'; // Show fifth arrow
+          file.style.opacity = '0'; // Hide the file
+        }, 9500);
+        
+        // Show LAN transfer in parallel
+        addTimeout(() => {
+          lanTransfer.style.opacity = '1'; // Show LAN transfer option
+          arrows[5].style.opacity = '1'; // Show connection to the upload step
+        }, 10500);
+        
+        // Final result showing
+        addTimeout(() => {
+          steps[4].classList.remove('active');
+          result.classList.add('active'); // Highlight Result
+          isPlaying = false;
+          
+          // Auto-restart after delay if still in play mode
+          addTimeout(() => {
+            if (document.visibilityState === 'visible') {
+              startAnimation();
+            }
+          }, 3000);
+        }, 11500);
+      };
+      
+      // Event listeners for buttons
+      playBtn.addEventListener('click', startAnimation);
+      
+      pauseBtn.addEventListener('click', () => {
+        clearAnimationTimeouts();
+        isPlaying = false;
+      });
+      
+      resetBtn.addEventListener('click', resetAnimation);
+      
+      // Start animation when page loads
+      addTimeout(startAnimation, 1000);
+      
+      // Pause animation when page is not visible
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState !== 'visible' && isPlaying) {
+          clearAnimationTimeouts();
+          isPlaying = false;
+        }
+      });
+    });
   </script>
 </body>
 </html>

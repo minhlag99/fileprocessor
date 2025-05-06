@@ -9,11 +9,13 @@ import (
 	"log"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/example/fileprocessor/internal/models"
 	"github.com/example/fileprocessor/internal/processors"
 	"github.com/example/fileprocessor/internal/storage"
+	"github.com/gorilla/mux"
 )
 
 // FileHandler handles file operations
@@ -564,6 +566,90 @@ func (h *FileHandler) DeleteFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sendJSONResponse(w, response, http.StatusOK)
+}
+
+// MediaPreviewHandler serves media preview for files
+func (h *FileHandler) MediaPreviewHandler(w http.ResponseWriter, r *http.Request) {
+	// Extract the file ID from the URL parameters
+	vars := mux.Vars(r)
+	fileID := vars["id"]
+
+	if fileID == "" {
+		sendJSONError(w, "File ID is required", http.StatusBadRequest)
+		return
+	}
+
+	// Get storage parameters
+	storageType := r.URL.Query().Get("storageType")
+	if storageType == "" {
+		storageType = "local"
+	}
+
+	// Check if the requested storage provider is available
+	if storageType != "local" {
+		available, reason := storage.IsProviderAvailable(storageType)
+		if !available {
+			sendJSONError(w, fmt.Sprintf("Storage provider '%s' is unavailable: %s", storageType, reason), http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Get appropriate storage provider
+	var provider storage.Provider
+	if storageType == "local" {
+		provider = h.defaultStorage
+	} else {
+		// Extract provider configuration from request
+		config := extractStorageConfig(r, storageType)
+		var err error
+		provider, err = storage.CreateProvider(storageType, config)
+		if err != nil {
+			sendJSONError(w, fmt.Sprintf("Failed to create storage provider: %v", err), http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Try to get the preview version first (by convention, preview files have _preview suffix)
+	previewID := fileID + "_preview"
+	reader, metadata, err := provider.Retrieve(r.Context(), previewID)
+
+	// If preview doesn't exist, fall back to the original file
+	if err != nil {
+		log.Printf("Preview not found for %s, falling back to original file: %v", fileID, err)
+		reader, metadata, err = provider.Retrieve(r.Context(), fileID)
+		if err != nil {
+			sendJSONError(w, fmt.Sprintf("Failed to retrieve file: %v", err), http.StatusInternalServerError)
+			return
+		}
+	}
+	defer reader.Close()
+
+	// Set headers for the response
+	filename := metadata["filename"]
+	if filename == "" {
+		filename = filepath.Base(fileID)
+	}
+
+	contentType := metadata["contentType"]
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+
+	w.Header().Set("Content-Type", contentType)
+
+	// For images and videos, use inline disposition so browser displays them
+	if strings.HasPrefix(contentType, "image/") || strings.HasPrefix(contentType, "video/") {
+		w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=%s", filename))
+	} else {
+		// For other files, use attachment disposition
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))
+	}
+
+	// Stream the file to the client
+	if _, err := io.Copy(w, reader); err != nil {
+		// Can't send an error response here as we've already written to the response
+		log.Printf("Error streaming file preview: %v\n", err)
+	}
 }
 
 // Helper functions

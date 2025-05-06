@@ -165,6 +165,7 @@ func main() {
 	mux.HandleFunc("/api/url", fileHandler.GetSignedURL)
 	mux.HandleFunc("/api/delete", fileHandler.DeleteFile)
 	mux.HandleFunc("/api/storage/status", fileHandler.GetStorageProviderStatus)
+	mux.HandleFunc("/api/preview/{id}", fileHandler.MediaPreviewHandler) // New endpoint for media previews
 
 	// WebSocket endpoint for real-time updates
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
