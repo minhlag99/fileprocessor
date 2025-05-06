@@ -386,7 +386,7 @@ ensure_ufw_installed() {
         echo -e "   ${GREEN}✓${NC} UFW installed"
     else
         echo -e "   ${GREEN}✓${NC} UFW already installed"
-    fi
+    }
 }
 
 # Function to install Go
@@ -525,35 +525,21 @@ EOF
 
 # Function to configure firewall
 configure_firewall() {
-    echo -e "${YELLOW}[6] Configuring firewall...${NC}"
     if command -v ufw &> /dev/null; then
-        echo -e "   Configuring UFW firewall..."
+        echo -e "${YELLOW}[6] Configuring firewall...${NC}"
         
-        # Check if IPv6 is enabled and working
-        IPV6_ENABLED=1
-        if [ ! -f /proc/sys/net/ipv6/conf/all/disable_ipv6 ] || [ "$(cat /proc/sys/net/ipv6/conf/all/disable_ipv6)" = "1" ]; then
-            IPV6_ENABLED=0
-            echo -e "   ${YELLOW}!${NC} IPv6 is disabled or not available on this system"
-        elif ! ip -6 addr show &>/dev/null; then
-            IPV6_ENABLED=0
-            echo -e "   ${YELLOW}!${NC} IPv6 configuration not found"
-        fi
+        # Allow SSH first to prevent lockout
+        sudo ufw allow ssh
         
-        # Disable IPv6 in UFW if not available or not working
-        if [ $IPV6_ENABLED -eq 0 ]; then
-            echo -e "   Configuring UFW to disable IPv6 rules..."
-            if [ -f /etc/default/ufw ]; then
-                sudo sed -i 's/IPV6=yes/IPV6=no/' /etc/default/ufw
-                echo -e "   ${GREEN}✓${NC} UFW configured to disable IPv6"
-            fi
-        fi
+        # Allow HTTP (Nginx) access from anywhere
+        sudo ufw allow 80/tcp
         
-        sudo ufw allow 22/tcp comment "SSH"
-        sudo ufw allow 80/tcp comment "HTTP"
-        sudo ufw allow 443/tcp comment "HTTPS"
-        sudo ufw allow $PORT/tcp comment "Go File Processor"
+        # Allow the application port
+        sudo ufw allow $PORT/tcp
         
-        if ! sudo ufw status | grep -q "Status: active"; then
+        # Check UFW status and only enable if not already enabled
+        UFW_STATUS=$(sudo ufw status | grep "Status: " | awk '{print $2}')
+        if [ "$UFW_STATUS" != "active" ]; then
             echo -e "   Enabling firewall..."
             echo "y" | sudo ufw enable
             
@@ -562,6 +548,12 @@ configure_firewall() {
                 echo -e "   ${YELLOW}!${NC} UFW enable failed, trying with force option..."
                 echo "y" | sudo ufw --force enable
             fi
+        else
+            echo -e "   Firewall already active, ensuring rules are applied..."
+            # Ensure critical rules exist even if already enabled
+            sudo ufw allow ssh
+            sudo ufw allow 80/tcp
+            sudo ufw allow $PORT/tcp
         fi
         
         echo -e "   ${GREEN}✓${NC} Firewall configured"
@@ -615,7 +607,7 @@ server {
 
     # Proxy all requests to the Go application
     location / {
-        proxy_pass http://localhost:$PORT;
+        proxy_pass http://127.0.0.1:$PORT;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection 'upgrade';
@@ -628,12 +620,21 @@ server {
 
     # For WebSocket connections
     location /ws {
-        proxy_pass http://localhost:$PORT;
+        proxy_pass http://127.0.0.1:$PORT;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
         proxy_set_header Host \$host;
         proxy_cache_bypass \$http_upgrade;
+    }
+    
+    # Health check endpoint for connectivity testing
+    location /health {
+        proxy_pass http://127.0.0.1:$PORT/health;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_cache_bypass \$http_upgrade;
+        access_log off;
     }
 
     # For large file uploads
@@ -746,122 +747,271 @@ start_application() {
 
 # Function to run network diagnostics
 run_network_diagnostics() {
-    echo -e "${YELLOW}[9] Running network diagnostics...${NC}"
+    echo -e "${YELLOW}[*] Running comprehensive network diagnostics...${NC}"
     
-    # Get private IP (internal network)
-    PRIVATE_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "Unknown")
-    echo -e "  - Private IP: ${GREEN}$PRIVATE_IP${NC} (accessible from your internal network)"
+    # Get public and private IPs
+    echo -e "   ${GREEN}Network interfaces:${NC}"
+    ip addr show | grep -E "inet |inet6 " | grep -v "127.0.0.1" || echo "   ${YELLOW}No IP address found${NC}"
     
-    # Get public IP (internet-facing)
-    PUBLIC_IP=$(curl -s https://api.ipify.org || curl -s http://checkip.amazonaws.com || echo "Could not determine")
-    if [ "$PUBLIC_IP" != "Could not determine" ]; then
-        echo -e "  - Public IP:  ${GREEN}$PUBLIC_IP${NC} (potentially accessible from the internet)"
-    else
-        echo -e "  - Public IP:  ${RED}Could not determine${NC} (may be behind NAT or firewall)"
-    fi
+    # Get routing table
+    echo -e "\n   ${GREEN}Routing table:${NC}"
+    ip route || netstat -rn || echo "   ${YELLOW}Cannot display routing table${NC}"
     
-    # Check listening ports
-    echo -e "\n  Checking listening ports..."
-    if command -v ss &> /dev/null; then
-        TOOL="ss -tulpn"
+    # Check the application port status
+    echo -e "\n   ${GREEN}Checking if application port $PORT is open:${NC}"
+    if command -v lsof &> /dev/null; then
+        sudo lsof -i:$PORT || echo "   ${YELLOW}No process listening on port $PORT${NC}"
     elif command -v netstat &> /dev/null; then
-        TOOL="netstat -tulpn"
-    else
-        echo -e "  ${RED}Cannot check listening ports (ss/netstat not installed)${NC}"
-        echo "  To install: sudo apt-get update && sudo apt-get install net-tools"
-        TOOL=""
+        sudo netstat -tuln | grep ":$PORT " || echo "   ${YELLOW}No process listening on port $PORT${NC}"
+    else 
+        echo "   ${YELLOW}Cannot check port status (lsof/netstat not installed)${NC}"
     fi
     
-    if [ ! -z "$TOOL" ]; then
-        if $TOOL 2>/dev/null | grep -q ":$PORT "; then
-            echo -e "  - Port $PORT: ${GREEN}LISTENING${NC} (Application port)"
-        else
-            echo -e "  - Port $PORT: ${RED}NOT LISTENING${NC} (Application might not be running)"
-        fi
-        
-        if $TOOL 2>/dev/null | grep -q ":80 "; then
-            echo -e "  - Port 80:   ${GREEN}LISTENING${NC} (HTTP/Nginx)"
-        else
-            echo -e "  - Port 80:   ${RED}NOT LISTENING${NC} (HTTP/Nginx might not be running)"
-        fi
+    # Check if port 80 (HTTP) is open
+    echo -e "\n   ${GREEN}Checking if HTTP port 80 is open:${NC}"
+    if command -v lsof &> /dev/null; then
+        sudo lsof -i:80 || echo "   ${YELLOW}No process listening on port 80${NC}"
+    elif command -v netstat &> /dev/null; then
+        sudo netstat -tuln | grep ":80 " || echo "   ${YELLOW}No process listening on port 80${NC}"
+    else
+        echo "   ${YELLOW}Cannot check port status (lsof/netstat not installed)${NC}"
+    fi
+    
+    # Check DNS resolution
+    echo -e "\n   ${GREEN}Testing DNS resolution:${NC}"
+    if command -v dig &> /dev/null; then
+        echo -e "   Testing with dig:"
+        dig +short google.com
+    elif command -v nslookup &> /dev/null; then
+        echo -e "   Testing with nslookup:"
+        nslookup google.com | grep -i "address" | tail -n 2
+    else
+        echo -e "   Testing with basic hostname resolution:"
+        ping -c 1 google.com | head -n 1
+    fi
+    
+    # Check internet connectivity
+    echo -e "\n   ${GREEN}Testing internet connectivity:${NC}"
+    if ping -c 3 -W 2 8.8.8.8 &> /dev/null; then
+        echo -e "   ${GREEN}✓${NC} Internet connectivity: GOOD (Can reach 8.8.8.8)"
+    else
+        echo -e "   ${RED}×${NC} Internet connectivity: FAILED (Cannot reach 8.8.8.8)"
+    fi
+    
+    if ping -c 3 -W 2 google.com &> /dev/null; then
+        echo -e "   ${GREEN}✓${NC} DNS resolution: GOOD (Can reach google.com)"
+    else
+        echo -e "   ${RED}×${NC} DNS resolution: FAILED (Cannot reach google.com)"
     fi
     
     # Check firewall status
-    echo -e "\n  Checking firewall rules..."
+    echo -e "\n   ${GREEN}Checking firewall status:${NC}"
     if command -v ufw &> /dev/null; then
-        UFW_STATUS=$(sudo ufw status | grep "Status: " | awk '{print $2}')
-        if [ "$UFW_STATUS" = "active" ]; then
-            echo -e "  - Firewall:  ${GREEN}ACTIVE${NC}"
-            
-            # Check if ports are open
-            HTTP_ALLOWED=$(sudo ufw status | grep "80/tcp" | grep "ALLOW" | wc -l)
-            APP_PORT_ALLOWED=$(sudo ufw status | grep "$PORT/tcp" | grep "ALLOW" | wc -l)
-            
-            if [ $HTTP_ALLOWED -gt 0 ]; then
-                echo -e "    - Port 80:   ${GREEN}OPEN${NC}"
-            else
-                echo -e "    - Port 80:   ${RED}CLOSED${NC}"
-            fi
-            
-            if [ $APP_PORT_ALLOWED -gt 0 ]; then
-                echo -e "    - Port $PORT: ${GREEN}OPEN${NC}"
-            else
-                echo -e "    - Port $PORT: ${RED}CLOSED${NC}"
-            fi
-        else
-            echo -e "  - Firewall:  ${YELLOW}INACTIVE${NC} (all ports open)"
-        fi
+        sudo ufw status verbose
     else
-        echo -e "  - Firewall:  ${YELLOW}NOT INSTALLED${NC}"
+        echo "   ${YELLOW}UFW firewall not installed${NC}"
+        # Check iptables as alternative
+        if command -v iptables &> /dev/null; then
+            echo "   Checking iptables rules:"
+            sudo iptables -L -n | grep -E "Chain|ACCEPT|DROP|REJECT"
+        fi
+    fi
+
+    # Check if Nginx is running
+    echo -e "\n   ${GREEN}Checking Nginx status:${NC}"
+    if command -v nginx &> /dev/null; then
+        sudo systemctl status nginx --no-pager || echo "   ${YELLOW}Nginx not running${NC}"
+        # Check Nginx config
+        echo -e "\n   ${GREEN}Validating Nginx configuration:${NC}"
+        sudo nginx -t
+    else
+        echo "   ${YELLOW}Nginx not installed${NC}"
     fi
     
-    # Check HTTP connectivity
-    echo -e "\n  Testing HTTP connectivity..."
+    # Check if the application service is running
+    echo -e "\n   ${GREEN}Checking application service status:${NC}"
+    sudo systemctl status $SERVICE_NAME --no-pager || echo "   ${YELLOW}Service $SERVICE_NAME not running${NC}"
+    
+    # Test local application connectivity
+    echo -e "\n   ${GREEN}Testing local application connectivity:${NC}"
     if command -v curl &> /dev/null; then
-        # Test local app connection
-        HTTP_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:$PORT 2>/dev/null || echo "Failed")
-        if [ "$HTTP_RESPONSE" = "200" ] || [ "$HTTP_RESPONSE" = "302" ] || [ "$HTTP_RESPONSE" = "301" ]; then
-            echo -e "  - Local app: ${GREEN}REACHABLE${NC} (HTTP $HTTP_RESPONSE)"
-        else
-            echo -e "  - Local app: ${RED}NOT REACHABLE${NC} (HTTP $HTTP_RESPONSE)"
-        fi
+        echo "   Testing localhost:"
+        curl -s -o /dev/null -w "   Response Code: %{http_code}\n" http://localhost:$PORT || echo "   ${RED}Failed to connect to application locally${NC}"
         
-        # Test local nginx if installed
-        if command -v nginx &> /dev/null; then
-            HTTP_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost 2>/dev/null || echo "Failed")
-            if [ "$HTTP_RESPONSE" = "200" ] || [ "$HTTP_RESPONSE" = "302" ] || [ "$HTTP_RESPONSE" = "301" ]; then
-                echo -e "  - Local web: ${GREEN}REACHABLE${NC} (HTTP $HTTP_RESPONSE)"
+        echo "   Testing loopback address:"
+        curl -s -o /dev/null -w "   Response Code: %{http_code}\n" http://127.0.0.1:$PORT || echo "   ${RED}Failed to connect to application via loopback${NC}"
+        
+        # Try via hostname
+        LOCAL_IP=$(hostname -I | awk '{print $1}')
+        if [ ! -z "$LOCAL_IP" ]; then
+            echo "   Testing via local IP ($LOCAL_IP):"
+            curl -s -o /dev/null -w "   Response Code: %{http_code}\n" http://$LOCAL_IP:$PORT || echo "   ${RED}Failed to connect to application via local IP${NC}"
+        fi
+    else
+        echo "   ${YELLOW}Cannot test connectivity (curl not installed)${NC}"
+    fi
+    
+    # Get public IP
+    PUBLIC_IP=$(curl -s https://api.ipify.org || curl -s http://checkip.amazonaws.com || echo "unknown")
+    echo -e "\n   ${GREEN}Public IP address: $PUBLIC_IP${NC}"
+    
+    # Check open ports (using nmap if available)
+    if command -v nmap &> /dev/null; then
+        echo -e "\n   ${GREEN}Scanning for open ports:${NC}"
+        echo -e "   (This may take a few seconds...)"
+        NMAP_RESULT=$(nmap -T4 -p80,$PORT localhost)
+        echo "$NMAP_RESULT" | grep -E "^[0-9]+\/tcp"
+        
+        # Scan externally visible ports if public IP is available
+        if [ "$PUBLIC_IP" != "unknown" ]; then
+            echo -e "\n   ${GREEN}Testing externally visible ports (from this machine):${NC}"
+            echo -e "   (This may take a few seconds...)"
+            EXTERNAL_SCAN=$(nmap -T4 -p80,$PORT $PUBLIC_IP)
+            echo "$EXTERNAL_SCAN" | grep -E "^[0-9]+\/tcp"
+        fi
+    fi
+    
+    echo -e "\n${GREEN}Network diagnostics completed.${NC}"
+}
+
+# Function to test public internet connectivity
+public_connectivity_test() {
+    echo -e "${YELLOW}[*] Testing public internet connectivity...${NC}"
+    
+    PUBLIC_IP=$(curl -s https://api.ipify.org || curl -s http://checkip.amazonaws.com || echo "unknown")
+    
+    if [ "$PUBLIC_IP" == "unknown" ]; then
+        echo -e "   ${RED}Could not determine public IP address.${NC}"
+        echo -e "   Make sure this server has internet connectivity."
+        return
+    fi
+    
+    echo -e "   Public IP: $PUBLIC_IP"
+    
+    # Wait for services to be fully initialized
+    echo -e "   Waiting for services to fully initialize (15 seconds)..."
+    sleep 15
+    
+    # Test via different methods
+    echo -e "   Testing multiple connectivity methods..."
+    
+    # Test via Nginx (port 80)
+    echo -e "   1. Testing via HTTP (port 80):"
+    if command -v curl &> /dev/null; then
+        CURL_RESULT=$(curl -s -I "http://$PUBLIC_IP" 2>&1)
+        HTTP_CODE=$(echo "$CURL_RESULT" | head -n 1 | cut -d' ' -f2)
+        
+        if [ -z "$HTTP_CODE" ]; then
+            echo -e "   ${RED}Could not connect to http://$PUBLIC_IP${NC}"
+            echo -e "   This could be due to firewall restrictions or Nginx not properly configured."
+        elif [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 400 ]; then
+            echo -e "   ${GREEN}✓${NC} Successfully connected to http://$PUBLIC_IP (HTTP $HTTP_CODE)"
+        else
+            echo -e "   ${RED}Received HTTP $HTTP_CODE response from http://$PUBLIC_IP${NC}"
+        fi
+    else
+        echo -e "   ${YELLOW}Cannot test HTTP connectivity (curl not installed)${NC}"
+    fi
+    
+    # Test direct application port
+    echo -e "   2. Testing direct application port $PORT:"
+    if command -v curl &> /dev/null; then
+        CURL_RESULT=$(curl -s -I "http://$PUBLIC_IP:$PORT" 2>&1)
+        if [[ "$CURL_RESULT" == *"Connection refused"* || "$CURL_RESULT" == *"Failed to connect"* ]]; then
+            echo -e "   ${RED}Could not connect to http://$PUBLIC_IP:$PORT${NC}"
+            echo -e "   This could be due to firewall restrictions or the application not binding correctly to external interfaces."
+        else
+            HTTP_CODE=$(echo "$CURL_RESULT" | head -n 1 | cut -d' ' -f2)
+            if [ -z "$HTTP_CODE" ]; then
+                echo -e "   ${RED}No HTTP response from http://$PUBLIC_IP:$PORT${NC}"
+            elif [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 400 ]; then
+                echo -e "   ${GREEN}✓${NC} Successfully connected to http://$PUBLIC_IP:$PORT (HTTP $HTTP_CODE)"
             else
-                echo -e "  - Local web: ${RED}NOT REACHABLE${NC} (HTTP $HTTP_RESPONSE)"
+                echo -e "   ${RED}Received HTTP $HTTP_CODE response from http://$PUBLIC_IP:$PORT${NC}"
             fi
         fi
     else
-        echo -e "  - HTTP Test: ${YELLOW}SKIPPED${NC} (curl not installed)"
+        echo -e "   ${YELLOW}Cannot test direct port connectivity (curl not installed)${NC}"
     fi
+    
+    # Test from external resources if possible (using external service)
+    echo -e "   3. Testing external connectivity (Internet perspective):"
+    if command -v curl &> /dev/null; then
+        echo -e "   Checking port $PORT from external perspective..."
+        # Use a service like portchecker.co to check if port is accessible from internet
+        EXTERNAL_CHECK=$(curl -s "https://portchecker.co/check" --data "port=$PORT&ip=$PUBLIC_IP" | grep -o "Port $PORT is.*")
+        
+        if [[ "$EXTERNAL_CHECK" == *"open"* ]]; then
+            echo -e "   ${GREEN}✓${NC} Port $PORT appears to be accessible from the internet"
+        elif [[ "$EXTERNAL_CHECK" == *"closed"* ]]; then
+            echo -e "   ${RED}×${NC} Port $PORT appears to be closed from the internet"
+            echo -e "   This might be due to firewall restrictions or NAT configuration."
+        else
+            echo -e "   ${YELLOW}?${NC} Could not determine if port $PORT is accessible from the internet"
+        fi
+    fi
+    
+    echo -e "\n   Testing LAN connectivity..."
+    # Get local IP
+    LOCAL_IP=$(hostname -I | awk '{print $1}')
+    if [ ! -z "$LOCAL_IP" ]; then
+        echo -e "   Local IP: $LOCAL_IP"
+        echo -e "   For LAN access, other devices on your network can use: http://$LOCAL_IP:$PORT"
+    fi
+    
+    echo -e "\n${GREEN}Connectivity test completed.${NC}"
+    
+    # Provide summary
+    echo -e "\n${YELLOW}CONNECTIVITY SUMMARY:${NC}"
+    if [ "$PUBLIC_IP" != "unknown" ]; then
+        echo -e "   • Public URL: http://$PUBLIC_IP"
+        if command -v curl &> /dev/null; then
+            if curl -s -I "http://$PUBLIC_IP" &>/dev/null; then
+                echo -e "   ${GREEN}✓${NC} Nginx connection: WORKING"
+            else
+                echo -e "   ${RED}×${NC} Nginx connection: NOT WORKING"
+            fi
+            
+            if curl -s -I "http://$PUBLIC_IP:$PORT" &>/dev/null; then
+                echo -e "   ${GREEN}✓${NC} Direct port connection: WORKING"
+            else
+                echo -e "   ${RED}×${NC} Direct port connection: NOT WORKING"
+            fi
+        fi
+    fi
+    
+    if [ ! -z "$LOCAL_IP" ]; then
+        echo -e "   • Local URL: http://$LOCAL_IP:$PORT (for LAN access)"
+    fi
+    
+    echo -e "\n   If you're having connectivity issues, check:"
+    echo -e "   1. Firewall settings (both server and cloud provider)"
+    echo -e "   2. Configuration binding (ensure server listens on 0.0.0.0)"
+    echo -e "   3. Router/NAT configuration if behind a home network"
+    echo -e "   4. Run network diagnostics again to troubleshoot further"
 }
 
 # Function to display connection information
 display_connection_info() {
-    echo -e "${YELLOW}[10] Connection summary...${NC}"
+    echo -e "${YELLOW}[*] Your Go File Processor application is ready!${NC}"
+    
+    PUBLIC_IP=$(curl -s https://api.ipify.org || curl -s http://checkip.amazonaws.com || hostname -I | awk '{print $1}')
+    
+    echo -e "\n${GREEN}Connection Information:${NC}"
+    echo -e "   Main application: http://$PUBLIC_IP"
+    echo -e "   Direct port access: http://$PUBLIC_IP:$PORT"
+    
+    echo -e "\n${GREEN}Troubleshooting Tips:${NC}"
+    echo -e "   • If you cannot access the application, check your firewall settings"
+    echo -e "   • Ensure your cloud provider's security groups/firewall allow ports 80 and $PORT"
+    echo -e "   • For AWS/GCP/Azure VMs, check your network ACLs and security groups"
+    echo -e "   • Run 'sudo systemctl status $SERVICE_NAME' to check application status"
+    echo -e "   • Run 'sudo systemctl status nginx' to check web server status"
+    echo -e "   • View application logs: sudo cat $APP_DIR/logs/error.log"
+    echo -e "   • View service logs: sudo journalctl -u $SERVICE_NAME -n 50"
     
     echo -e "\n${BLUE}============================================${NC}"
-    echo -e "${BLUE}      Deployment Complete!                  ${NC}"
-    echo -e "${BLUE}============================================${NC}"
-    echo -e "\n${GREEN}Access the application:${NC}"
-    echo -e "  - Via HTTP: http://$PUBLIC_IP/"
-    echo -e "  - Direct application port: http://$PUBLIC_IP:$PORT/"
-    if [ "$(command -v nginx)" ] && [ "$(systemctl is-active nginx)" == "active" ]; then
-        echo -e "  - Via Nginx: http://$PUBLIC_IP/"
-    fi
-    echo -e "\n${BLUE}Application Management:${NC}"
-    echo -e "  - Check status: sudo systemctl status $APP_NAME"
-    echo -e "  - View logs: sudo journalctl -u $APP_NAME"
-    echo -e "  - Log files: $APP_DIR/logs/"
-    echo -e "\n${BLUE}Troubleshooting:${NC}"
-    echo -e "  - Run this script with option 4 to diagnose network issues"
-    echo -e "  - Check firewall settings: sudo ufw status"
-    echo -e "  - Verify Nginx config: sudo nginx -t"
-    echo -e "  - Reload service: sudo systemctl restart $APP_NAME"
+    echo -e "${BLUE}      Deployment Complete!     ${NC}"
     echo -e "${BLUE}============================================${NC}"
 }
 
@@ -1100,5 +1250,37 @@ public_connectivity_test() {
     fi
 }
 
-# Start by selecting deployment mode
-select_deployment_mode
+# Main deployment process
+main() {
+    print_banner
+    
+    # Set configuration variables
+    set_config_variables
+    
+    # Check system requirements
+    check_system_requirements
+    
+    # Install required packages
+    install_required_packages
+    
+    # Set up the application environment
+    setup_app_environment
+
+    # Configure and start Nginx
+    configure_nginx
+    
+    # Configure the application as a service
+    configure_service
+    
+    # Run network diagnostics to verify connectivity
+    run_network_diagnostics
+    
+    # Test public connectivity
+    public_connectivity_test
+    
+    # Display connection information and instructions
+    display_connection_info
+}
+
+# Run the main function
+main "$@"

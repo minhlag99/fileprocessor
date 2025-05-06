@@ -9,23 +9,23 @@ import (
 	"time"
 )
 
-// AuthHandler handles authentication requests
-type AuthHandler struct {
+// Handler handles authentication requests
+type Handler struct {
 	authManager *AuthManager
 }
 
-// NewAuthHandler creates a new authentication handler
-func NewAuthHandler(manager *AuthManager) *AuthHandler {
+// NewHandler creates a new authentication handler
+func NewHandler(manager *AuthManager) *Handler {
 	if manager == nil {
 		manager = DefaultAuthManager
 	}
-	return &AuthHandler{
+	return &Handler{
 		authManager: manager,
 	}
 }
 
 // HandleLogin handles login requests
-func (h *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -63,7 +63,7 @@ func (h *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleCallback handles OAuth callback
-func (h *AuthHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -113,7 +113,7 @@ func (h *AuthHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleProfile handles user profile requests
-func (h *AuthHandler) HandleProfile(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) HandleProfile(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -146,7 +146,7 @@ func (h *AuthHandler) HandleProfile(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleLogout handles logout requests
-func (h *AuthHandler) HandleLogout(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) HandleLogout(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -176,7 +176,7 @@ func (h *AuthHandler) HandleLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleCloudConfig handles cloud configuration requests
-func (h *AuthHandler) HandleCloudConfig(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) HandleCloudConfig(w http.ResponseWriter, r *http.Request) {
 	// Get session cookie
 	cookie, err := r.Cookie("session_id")
 	if err != nil {
@@ -240,8 +240,8 @@ func (h *AuthHandler) HandleCloudConfig(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-// DefaultAuthHandler is the default authentication handler
-var DefaultAuthHandler = NewAuthHandler(DefaultAuthManager)
+// DefaultHandler is the default authentication handler
+var DefaultHandler = NewHandler(DefaultAuthManager)
 
 // LoginHandler handles OAuth login requests
 func LoginHandler(w http.ResponseWriter, r *http.Request) {

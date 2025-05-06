@@ -18,31 +18,14 @@ import (
 
 // FileHandler handles file operations
 type FileHandler struct {
-	storageFactory *storage.StorageFactory
-	defaultStorage storage.StorageProvider
+	defaultStorage storage.Provider
 }
 
 // NewFileHandler creates a new file handler
-func NewFileHandler() (*FileHandler, error) {
-	// Create default local storage for files
-	defaultStorage, err := storage.CreateProvider("local", map[string]string{
-		"basePath": "./uploads",
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create default storage: %w", err)
-	}
-
-	// Initialize handlers with the storage factory
-	handler := &FileHandler{
-		storageFactory: storage.DefaultFactory,
+func NewFileHandler(defaultStorage storage.Provider) *FileHandler {
+	return &FileHandler{
 		defaultStorage: defaultStorage,
 	}
-
-	// Try initializing cloud providers with empty configs to check if they're available
-	// This helps identify issues early rather than when the user tries to use them
-	handler.testCloudProviderAvailability()
-
-	return handler, nil
 }
 
 // testCloudProviderAvailability attempts to initialize cloud providers with empty configs
@@ -146,7 +129,7 @@ func (h *FileHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get appropriate storage provider
-	var provider storage.StorageProvider
+	var provider storage.Provider
 	if storageType == "local" {
 		provider = h.defaultStorage
 	} else {
@@ -325,7 +308,7 @@ func (h *FileHandler) DownloadFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get appropriate storage provider
-	var provider storage.StorageProvider
+	var provider storage.Provider
 	if storageType == "local" {
 		provider = h.defaultStorage
 	} else {
@@ -392,7 +375,7 @@ func (h *FileHandler) ListFiles(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get appropriate storage provider
-	var provider storage.StorageProvider
+	var provider storage.Provider
 	if storageType == "local" {
 		provider = h.defaultStorage
 	} else {
@@ -491,7 +474,7 @@ func (h *FileHandler) GetSignedURL(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get appropriate storage provider
-	var provider storage.StorageProvider
+	var provider storage.Provider
 	if storageType == "local" {
 		provider = h.defaultStorage
 	} else {
@@ -554,7 +537,7 @@ func (h *FileHandler) DeleteFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get appropriate storage provider
-	var provider storage.StorageProvider
+	var provider storage.Provider
 	if storageType == "local" {
 		provider = h.defaultStorage
 	} else {
@@ -613,7 +596,7 @@ func createProcessedFile(file *models.File, result *processors.ProcessResult) *m
 }
 
 // processUploadedFile processes a file using the appropriate processor
-func processUploadedFile(ctx context.Context, file *models.File, provider storage.StorageProvider) (*models.ProcessedFile, error) {
+func processUploadedFile(ctx context.Context, file *models.File, provider storage.Provider) (*models.ProcessedFile, error) {
 	// Get file content
 	reader, _, err := provider.Retrieve(ctx, file.StorageID)
 	if err != nil {

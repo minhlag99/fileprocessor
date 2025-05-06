@@ -311,3 +311,13 @@ func main() {
 
 	log.Println("Server shutdown complete")
 }
+
+func setupRoutes(mux *http.ServeMux, fileHandler *handlers.FileHandler) {
+	// File API routes
+	mux.HandleFunc("/api/upload", fileHandler.UploadFile)
+	mux.HandleFunc("/api/download", fileHandler.DownloadFile)
+	mux.HandleFunc("/api/list", fileHandler.ListFiles)
+	mux.HandleFunc("/api/url", fileHandler.GetSignedURL)
+	mux.HandleFunc("/api/delete", fileHandler.DeleteFile)
+	mux.HandleFunc("/api/storage/status", fileHandler.GetStorageProviderStatus)
+}

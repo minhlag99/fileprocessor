@@ -10,8 +10,8 @@ import (
 	"strconv"
 )
 
-// Config holds the application configuration
-type Config struct {
+// Settings holds the application configuration
+type Settings struct {
 	Server   ServerConfig  `json:"server"`
 	Storage  StorageConfig `json:"storage"`
 	Workers  WorkerConfig  `json:"workers"`
@@ -63,12 +63,12 @@ type AuthConfig struct {
 }
 
 // AppConfig is the global application configuration
-var AppConfig Config
+var AppConfig Settings
 
 // LoadConfig loads configuration from a file and environment variables
 func LoadConfig(configFile string) error {
 	// Set defaults
-	AppConfig = Config{
+	AppConfig = Settings{
 		Server: ServerConfig{
 			Port:            8080,
 			UIDir:           "./ui",

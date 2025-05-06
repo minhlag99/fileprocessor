@@ -7,23 +7,23 @@ import (
 	"time"
 )
 
-// AuthMiddleware provides authentication middleware
-type AuthMiddleware struct {
+// Middleware provides authentication middleware
+type Middleware struct {
 	authManager *AuthManager
 }
 
-// NewAuthMiddleware creates a new authentication middleware
-func NewAuthMiddleware(manager *AuthManager) *AuthMiddleware {
+// NewMiddleware creates a new authentication middleware
+func NewMiddleware(manager *AuthManager) *Middleware {
 	if manager == nil {
 		manager = DefaultAuthManager
 	}
-	return &AuthMiddleware{
+	return &Middleware{
 		authManager: manager,
 	}
 }
 
 // RequireAuth ensures that a request is authenticated
-func (m *AuthMiddleware) RequireAuth(next http.HandlerFunc) http.HandlerFunc {
+func (m *Middleware) RequireAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Check for session cookie
 		cookie, err := r.Cookie("session_id")
@@ -52,7 +52,7 @@ func (m *AuthMiddleware) RequireAuth(next http.HandlerFunc) http.HandlerFunc {
 }
 
 // RequireAuthOptional allows anonymous or authenticated requests
-func (m *AuthMiddleware) RequireAuthOptional(next http.HandlerFunc) http.HandlerFunc {
+func (m *Middleware) RequireAuthOptional(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Check for session cookie
 		cookie, err := r.Cookie("session_id")
@@ -75,8 +75,8 @@ func (m *AuthMiddleware) RequireAuthOptional(next http.HandlerFunc) http.Handler
 	}
 }
 
-// DefaultAuthMiddleware is the default authentication middleware
-var DefaultAuthMiddleware = NewAuthMiddleware(DefaultAuthManager)
+// DefaultMiddleware is the default authentication middleware
+var DefaultMiddleware = NewMiddleware(DefaultAuthManager)
 
 // AuthMiddlewareHandler is middleware that checks if the user is authenticated
 func AuthMiddlewareHandler(next http.Handler) http.Handler {
