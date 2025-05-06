@@ -528,20 +528,54 @@ configure_firewall() {
     echo -e "${YELLOW}[6] Configuring firewall...${NC}"
     if command -v ufw &> /dev/null; then
         echo -e "   Configuring UFW firewall..."
+        
+        # Check if IPv6 is enabled and working
+        IPV6_ENABLED=1
+        if [ ! -f /proc/sys/net/ipv6/conf/all/disable_ipv6 ] || [ "$(cat /proc/sys/net/ipv6/conf/all/disable_ipv6)" = "1" ]; then
+            IPV6_ENABLED=0
+            echo -e "   ${YELLOW}!${NC} IPv6 is disabled or not available on this system"
+        elif ! ip -6 addr show &>/dev/null; then
+            IPV6_ENABLED=0
+            echo -e "   ${YELLOW}!${NC} IPv6 configuration not found"
+        fi
+        
+        # Disable IPv6 in UFW if not available or not working
+        if [ $IPV6_ENABLED -eq 0 ]; then
+            echo -e "   Configuring UFW to disable IPv6 rules..."
+            if [ -f /etc/default/ufw ]; then
+                sudo sed -i 's/IPV6=yes/IPV6=no/' /etc/default/ufw
+                echo -e "   ${GREEN}✓${NC} UFW configured to disable IPv6"
+            fi
+        fi
+        
         sudo ufw allow 22/tcp comment "SSH"
         sudo ufw allow 80/tcp comment "HTTP"
         sudo ufw allow 443/tcp comment "HTTPS"
         sudo ufw allow $PORT/tcp comment "Go File Processor"
         
         if ! sudo ufw status | grep -q "Status: active"; then
-            echo "   Enabling firewall..."
+            echo -e "   Enabling firewall..."
             echo "y" | sudo ufw enable
+            
+            # If enabling fails, try again with --force flag
+            if [ $? -ne 0 ]; then
+                echo -e "   ${YELLOW}!${NC} UFW enable failed, trying with force option..."
+                echo "y" | sudo ufw --force enable
+            fi
         fi
         
         echo -e "   ${GREEN}✓${NC} Firewall configured"
     else
-        echo -e "   ${RED}×${NC} UFW not found even after attempted installation."
-        echo -e "   Please manually install UFW: sudo apt-get update && sudo apt-get install -y ufw"
+        echo -e "   ${RED}×${NC} UFW not found. Installing..."
+        sudo apt-get update && sudo apt-get install -y ufw
+        
+        # Try again after installation
+        if command -v ufw &> /dev/null; then
+            configure_firewall
+        else
+            echo -e "   ${RED}×${NC} UFW not found even after attempted installation."
+            echo -e "   Please manually install UFW: sudo apt-get update && sudo apt-get install -y ufw"
+        fi
     fi
 }
 
