@@ -206,6 +206,44 @@ func main() {
 	mux.Handle("/", http.FileServer(http.Dir(config.AppConfig.Server.UIDir)))
 
 	// Create HTTP server
+	// Check if the configured port is available, if not find a free port
+	originalPort := config.AppConfig.Server.Port
+	if isPortInUse(originalPort) {
+		newPort := findFreePort(originalPort)
+		if newPort != originalPort {
+			log.Printf("Port %d is already in use. Switching to alternative port %d", originalPort, newPort)
+			// Update the port in the configuration
+			config.AppConfig.Server.Port = newPort
+
+			// If using OAuth, update the redirectURL with the new port
+			if config.AppConfig.Features.EnableAuth {
+				proto := "http"
+				if config.AppConfig.Server.CertFile != "" && config.AppConfig.Server.KeyFile != "" {
+					proto = "https"
+				}
+				// Only update if the redirect URL contains the original port
+				if config.AppConfig.Auth.OAuthRedirectURL != "" &&
+					config.AppConfig.Auth.OAuthRedirectURL != "http://localhost:8080/api/auth/callback" {
+					newRedirectURL := fmt.Sprintf("%s://%s:%d/api/auth/callback",
+						proto,
+						config.AppConfig.Server.Host,
+						newPort)
+					config.AppConfig.Auth.OAuthRedirectURL = newRedirectURL
+					// Re-initialize auth with the new URL
+					auth.Init(
+						config.AppConfig.Auth.GoogleClientID,
+						config.AppConfig.Auth.GoogleClientSecret,
+						newRedirectURL,
+					)
+					log.Printf("OAuth redirects updated to: %s", newRedirectURL)
+				}
+			}
+		} else {
+			log.Printf("Warning: Port %d is in use, but no alternative port was found. The server may fail to start.", originalPort)
+		}
+	}
+
+	// Get the (possibly updated) address
 	addr := config.GetAddressString()
 	server := &http.Server{
 		Addr:    addr,
