@@ -386,7 +386,7 @@ ensure_ufw_installed() {
         echo -e "   ${GREEN}✓${NC} UFW installed"
     else
         echo -e "   ${GREEN}✓${NC} UFW already installed"
-    }
+    fi
 }
 
 # Function to install Go
