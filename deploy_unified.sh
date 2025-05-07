@@ -1271,6 +1271,57 @@ public_connectivity_test() {
     fi
 }
 
+# Function to install required packages
+install_required_packages() {
+    echo -e "${YELLOW}[*] Installing required packages...${NC}"
+    if [[ "$OS_TYPE" != "windows" ]]; then
+        sudo apt-get update
+        sudo apt-get install -y curl wget ufw nginx lsof net-tools
+        echo -e "   ${GREEN}✓${NC} Required packages installed"
+    else
+        echo -e "   ${YELLOW}Skipping package installation on Windows${NC}"
+    fi
+}
+
+# Function to set up the application environment
+setup_app_environment() {
+    echo -e "${YELLOW}[*] Setting up application environment...${NC}"
+    create_directories
+    copy_files
+    update_config_file
+    install_go
+    build_application
+    echo -e "   ${GREEN}✓${NC} Application environment set up successfully"
+}
+
+# Function to configure Nginx
+configure_nginx() {
+    # Ask if user wants to install Nginx
+    read -p "Do you want to install and configure Nginx? (y/n): " install_nginx_input
+    if [[ $install_nginx_input == [Yy]* ]]; then
+        install_nginx
+    else
+        echo -e "${YELLOW}Skipping Nginx installation.${NC}"
+    fi
+}
+
+# Function to configure the application as a service
+configure_service() {
+    if [[ "$OS_TYPE" != "windows" ]]; then
+        create_service
+        ensure_ufw_installed
+        configure_firewall
+        start_application
+    else
+        # Windows-specific deployment steps
+        echo -e "${YELLOW}[5] Starting the application directly...${NC}"
+        echo -e "   Starting the application in a new terminal window"
+        cd $APP_DIR
+        nohup ./$APP_NAME > $APP_DIR/logs/output.log 2> $APP_DIR/logs/error.log &
+        echo -e "   ${GREEN}✓${NC} Application started"
+    fi
+}
+
 # Main deployment process
 main() {
     print_banner
