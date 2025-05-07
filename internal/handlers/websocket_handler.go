@@ -15,8 +15,8 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"fileprocessor/internal/auth"
-	"fileprocessor/internal/config"
+	"github.com/example/fileprocessor/internal/auth"
+	"github.com/example/fileprocessor/internal/config"
 )
 
 // Set conservative buffer sizes and timeouts for security
@@ -346,7 +346,7 @@ func (h *WebSocketHub) Subscribe(clientID, taskID string) {
 	}
 
 	// Check if already subscribed
-	for _, id := range h.tasks[taskID] {
+	for _, id := h.tasks[taskID] {
 		if id == clientID {
 			return
 		}
