@@ -563,6 +563,9 @@ configure_firewall() {
         # Allow HTTP (Nginx) access from anywhere
         sudo ufw allow 80/tcp
         
+        # Allow HTTP alternative port (8080) in case port 80 is busy
+        sudo ufw allow 8080/tcp
+        
         # Allow the application port
         sudo ufw allow $PORT/tcp
         
@@ -570,18 +573,51 @@ configure_firewall() {
         UFW_STATUS=$(sudo ufw status | grep "Status: " | awk '{print $2}')
         if [ "$UFW_STATUS" != "active" ]; then
             echo -e "   Enabling firewall..."
+            
+            # First try disabling IPv6 support if there are kernel module issues
+            if grep -q "IPV6=yes" /etc/default/ufw 2>/dev/null; then
+                echo -e "   ${YELLOW}Setting UFW to disable IPv6 to avoid kernel module errors${NC}"
+                sudo sed -i 's/IPV6=yes/IPV6=no/' /etc/default/ufw
+            fi
+            
+            # Try to enable UFW with normal method first
             echo "y" | sudo ufw enable
             
             # If enabling fails, try again with --force flag
             if [ $? -ne 0 ]; then
                 echo -e "   ${YELLOW}!${NC} UFW enable failed, trying with force option..."
                 echo "y" | sudo ufw --force enable
+                
+                # If still fails, try only IPv4 (this avoids the IPv6 errors)
+                if [ $? -ne 0 ]; then
+                    echo -e "   ${YELLOW}!${NC} UFW enable with force failed, trying IPv4-only configuration..."
+                    echo -e "   ${YELLOW}Creating custom iptables rules for IPv4 only${NC}"
+                    
+                    # Allow SSH
+                    sudo iptables -A INPUT -p tcp --dport 22 -j ACCEPT
+                    # Allow HTTP and app port
+                    sudo iptables -A INPUT -p tcp --dport 80 -j ACCEPT
+                    sudo iptables -A INPUT -p tcp --dport 8080 -j ACCEPT
+                    sudo iptables -A INPUT -p tcp --dport $PORT -j ACCEPT
+                    # Allow established connections
+                    sudo iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+                    # Allow loopback
+                    sudo iptables -A INPUT -i lo -j ACCEPT
+                    # Set default policies
+                    sudo iptables -P INPUT DROP
+                    sudo iptables -P FORWARD DROP
+                    sudo iptables -P OUTPUT ACCEPT
+                    
+                    echo -e "   ${YELLOW}!${NC} Created basic IPv4 firewall rules with iptables"
+                    echo -e "   ${YELLOW}!${NC} These rules will not persist after reboot unless saved"
+                fi
             fi
         else
             echo -e "   Firewall already active, ensuring rules are applied..."
             # Ensure critical rules exist even if already enabled
             sudo ufw allow ssh
             sudo ufw allow 80/tcp
+            sudo ufw allow 8080/tcp
             sudo ufw allow $PORT/tcp
         fi
         
@@ -610,22 +646,35 @@ install_nginx() {
         sudo apt-get update && sudo apt-get install -y nginx
     fi
     
-    # First, check if Nginx is already running on port 80
+    # Check if port 80 is already in use by another process (not Nginx)
+    NGINX_PORT=80
+    PORT_80_IN_USE=false
     if command -v lsof &> /dev/null; then
         PORT_CHECK=$(sudo lsof -i:80 | grep -v nginx)
         if [ ! -z "$PORT_CHECK" ]; then
-            echo -e "   ${RED}Warning:${NC} Port 80 is already in use by another process."
+            PORT_80_IN_USE=true
+            echo -e "   ${RED}Warning:${NC} Port 80 is already in use by another process:"
             echo -e "   $PORT_CHECK"
-            echo -e "   You may need to stop this process before Nginx can use port 80."
+            echo -e "   Will configure Nginx to use alternative port 8080"
+            NGINX_PORT=8080
+        fi
+    elif command -v ss &> /dev/null; then
+        PORT_CHECK=$(sudo ss -tulpn | grep ":80 " | grep -v nginx)
+        if [ ! -z "$PORT_CHECK" ]; then
+            PORT_80_IN_USE=true
+            echo -e "   ${RED}Warning:${NC} Port 80 is already in use by another process:"
+            echo -e "   $PORT_CHECK"
+            echo -e "   Will configure Nginx to use alternative port 8080"
+            NGINX_PORT=8080
         fi
     fi
     
     # Create Nginx configuration
-    echo -e "   Creating Nginx configuration..."
+    echo -e "   Creating Nginx configuration using port $NGINX_PORT..."
     cat > /tmp/$APP_NAME.conf << EOF
 server {
-    listen 80 default_server;
-    listen [::]:80 default_server;
+    listen $NGINX_PORT default_server;
+    listen [::]:$NGINX_PORT default_server;
     
     server_name $PUBLIC_IP _;
 
@@ -688,7 +737,19 @@ EOF
     echo -e "   Testing Nginx configuration..."
     if sudo nginx -t; then
         sudo systemctl restart nginx
-        echo -e "   ${GREEN}✓${NC} Nginx configured and restarted"
+        echo -e "   ${GREEN}✓${NC} Nginx configured and restarted on port $NGINX_PORT"
+        
+        # Update firewall rules to allow the Nginx port
+        if command -v ufw &> /dev/null; then
+            sudo ufw allow $NGINX_PORT/tcp
+            echo -e "   ${GREEN}✓${NC} Firewall updated to allow port $NGINX_PORT"
+        fi
+        
+        # Update display info with the correct port
+        if [ "$NGINX_PORT" != "80" ]; then
+            echo -e "   ${YELLOW}Note:${NC} Nginx running on non-standard port $NGINX_PORT"
+            echo -e "   Access your application at: http://$PUBLIC_IP:$NGINX_PORT"
+        fi
     else
         echo -e "   ${RED}✗${NC} Nginx configuration test failed"
         echo -e "   You may need to manually fix the Nginx configuration"
@@ -824,13 +885,13 @@ run_network_diagnostics() {
     if ping -c 3 -W 2 8.8.8.8 &> /dev/null; then
         echo -e "   ${GREEN}✓${NC} Internet connectivity: GOOD (Can reach 8.8.8.8)"
     else
-        echo -e "   ${RED}×${NC} Internet connectivity: FAILED (Cannot reach 8.8.8.8)"
+        echo -e "${RED}×${NC} Internet connectivity: FAILED (Cannot reach 8.8.8.8)"
     fi
     
     if ping -c 3 -W 2 google.com &> /dev/null; then
         echo -e "   ${GREEN}✓${NC} DNS resolution: GOOD (Can reach google.com)"
     else
-        echo -e "   ${RED}×${NC} DNS resolution: FAILED (Cannot reach google.com)"
+        echo -e "${RED}×${NC} DNS resolution: FAILED (Cannot reach google.com)"
     fi
     
     # Check firewall status
