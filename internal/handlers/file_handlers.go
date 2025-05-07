@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/example/fileprocessor/internal/config"
 	"github.com/example/fileprocessor/internal/models"
 	"github.com/example/fileprocessor/internal/processors"
 	"github.com/example/fileprocessor/internal/storage"
@@ -23,11 +24,28 @@ type FileHandler struct {
 	defaultStorage storage.Provider
 }
 
-// NewFileHandler creates a new file handler
-func NewFileHandler(defaultStorage storage.Provider) *FileHandler {
+// NewFileHandlerWithProvider creates a new file handler with a specified storage provider
+func NewFileHandlerWithProvider(defaultStorage storage.Provider) *FileHandler {
 	return &FileHandler{
 		defaultStorage: defaultStorage,
 	}
+}
+
+// NewFileHandler creates a new file handler with the default local storage provider
+func NewFileHandler() (*FileHandler, error) {
+	// Create a default local storage provider
+	storageConfig := map[string]string{
+		"basePath": config.AppConfig.Storage.Local.BasePath,
+	}
+
+	defaultStorage, err := storage.CreateProvider("local", storageConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create default storage provider: %w", err)
+	}
+
+	return &FileHandler{
+		defaultStorage: defaultStorage,
+	}, nil
 }
 
 // testCloudProviderAvailability attempts to initialize cloud providers with empty configs

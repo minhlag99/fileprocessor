@@ -183,3 +183,21 @@ func Submit(task *Task) error {
 	}
 	return DefaultPool.Submit(task)
 }
+
+// GetWorkerPoolStats returns the current stats of the worker pool
+func GetWorkerPoolStats() (int, int) {
+	if DefaultPool == nil {
+		return 0, 0
+	}
+
+	activeWorkers := 0
+	// Count active tasks as a proxy for active workers
+	DefaultPool.mu.RLock()
+	activeWorkers = len(DefaultPool.active)
+	DefaultPool.mu.RUnlock()
+
+	// Get queue size by checking channel buffer
+	queueSize := len(DefaultPool.tasks)
+
+	return activeWorkers, queueSize
+}

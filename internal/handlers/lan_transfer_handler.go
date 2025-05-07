@@ -138,11 +138,12 @@ func (h *LANTransferHandler) cleanupOldSessions() {
 }
 
 // Stop stops the LAN transfer handler
-func (h *LANTransferHandler) Stop() {
+func (h *LANTransferHandler) Stop() error {
 	// Stop the discovery service
 	h.discoveryService.Stop()
 
 	log.Println("LAN transfer service stopped")
+	return nil
 }
 
 // HandleDiscoverPeers handles requests to discover peers on the LAN

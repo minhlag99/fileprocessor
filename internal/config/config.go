@@ -27,14 +27,15 @@ var (
 // Config defines the application configuration
 type Config struct {
 	Server struct {
-		Port           int      `json:"port"`
-		Host           string   `json:"host"`
-		UIDir          string   `json:"uiDir"`
-		UploadsDir     string   `json:"uploadsDir"`
-		AllowedOrigins []string `json:"allowedOrigins"`
-		ReadTimeout    int      `json:"readTimeout"`
-		WriteTimeout   int      `json:"writeTimeout"`
-		IdleTimeout    int      `json:"idleTimeout"`
+		Port            int      `json:"port"`
+		Host            string   `json:"host"`
+		UIDir           string   `json:"uiDir"`
+		UploadsDir      string   `json:"uploadsDir"`
+		AllowedOrigins  []string `json:"allowedOrigins"`
+		ReadTimeout     int      `json:"readTimeout"`
+		WriteTimeout    int      `json:"writeTimeout"`
+		IdleTimeout     int      `json:"idleTimeout"`
+		ShutdownTimeout int      `json:"shutdownTimeout"` // Timeout in seconds for graceful shutdown
 	} `json:"server"`
 	Storage struct {
 		DefaultProvider string `json:"defaultProvider"`
@@ -155,6 +156,7 @@ func setDefaults() {
 	AppConfig.Server.ReadTimeout = 30
 	AppConfig.Server.WriteTimeout = 60
 	AppConfig.Server.IdleTimeout = 120
+	AppConfig.Server.ShutdownTimeout = 30 // Default 30 seconds for graceful shutdown
 
 	// Storage defaults
 	AppConfig.Storage.DefaultProvider = "local"
@@ -512,4 +514,9 @@ func SaveConfig(configPath string) error {
 	}
 
 	return nil
+}
+
+// LoadConfig loads and initializes the application configuration from the given file path
+func LoadConfig(configPath string) error {
+	return InitConfig(configPath)
 }

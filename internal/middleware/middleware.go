@@ -27,8 +27,8 @@ func Logger() Middleware {
 			start := time.Now()
 
 			// Don't log requests for static files
-			if !strings.HasPrefix(r.URL.Path, "/api") && 
-				!strings.HasPrefix(r.URL.Path, "/ws") && 
+			if !strings.HasPrefix(r.URL.Path, "/api") &&
+				!strings.HasPrefix(r.URL.Path, "/ws") &&
 				r.URL.Path != "/health" {
 				next.ServeHTTP(w, r)
 				return
@@ -36,10 +36,10 @@ func Logger() Middleware {
 
 			// Create a custom response writer to capture status code
 			rw := &responseWriter{w, http.StatusOK}
-			
+
 			// Process request
 			next.ServeHTTP(rw, r)
-			
+
 			// Log request details
 			duration := time.Since(start)
 			log.Printf(
@@ -70,25 +70,41 @@ func Recover() Middleware {
 }
 
 // CORS returns a middleware that handles CORS
-func CORS(allowedOrigins string) Middleware {
+func CORS(allowedOrigins []string) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Set CORS headers
-			origins := "*"
-			if allowedOrigins != "" {
-				origins = allowedOrigins
+			// Get the Origin header
+			origin := r.Header.Get("Origin")
+
+			// Set default value to "*" for allowing all origins
+			corsOrigin := "*"
+
+			// If specific origins are provided, check if the request origin is allowed
+			if len(allowedOrigins) > 0 && origin != "" {
+				// Check for wildcard
+				for _, allowed := range allowedOrigins {
+					if allowed == "*" {
+						corsOrigin = "*"
+						break
+					}
+					if allowed == origin {
+						corsOrigin = origin
+						break
+					}
+				}
 			}
-			
-			w.Header().Set("Access-Control-Allow-Origin", origins)
+
+			// Set CORS headers
+			w.Header().Set("Access-Control-Allow-Origin", corsOrigin)
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-			
+
 			// Handle preflight requests
 			if r.Method == "OPTIONS" {
 				w.WriteHeader(http.StatusOK)
 				return
 			}
-			
+
 			next.ServeHTTP(w, r)
 		})
 	}

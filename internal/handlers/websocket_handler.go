@@ -412,6 +412,21 @@ func (h *WebSocketHub) SendTaskUpdate(taskID string, updateType string, content 
 	}
 }
 
+// BroadcastSystemMessage sends a system message to all connected clients
+func (h *WebSocketHub) BroadcastSystemMessage(messageType string, content interface{}) {
+	if messageType == "" {
+		log.Printf("Warning: Attempted to broadcast system message with empty messageType")
+		return
+	}
+
+	h.broadcast <- ServerMessage{
+		Type:      messageType,
+		Content:   content,
+		Timestamp: time.Now().UnixNano() / int64(time.Millisecond),
+		RequestID: generateShortID(),
+	}
+}
+
 // Broadcast sends a message to all connected clients
 func (h *WebSocketHub) Broadcast(messageType string, content interface{}) {
 	if messageType == "" {
