@@ -3,7 +3,9 @@ package auth
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -12,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -60,10 +63,14 @@ type AuthManager struct {
 	userConfigs   map[string]map[string]map[string]string // userId -> provider -> config
 	dataDir       string
 	sessionExpiry time.Duration
+	sessionSecret string
 }
 
 // NewAuthManager creates a new authentication manager
 func NewAuthManager() *AuthManager {
+	// Generate a secure session secret
+	sessionSecret := generateSecureSecret(32)
+
 	return &AuthManager{
 		users:         make(map[string]*User),
 		sessions:      make(map[string]*UserSession),
@@ -72,7 +79,24 @@ func NewAuthManager() *AuthManager {
 		userConfigs:   make(map[string]map[string]map[string]string),
 		dataDir:       "./data/auth",
 		sessionExpiry: 24 * time.Hour,
+		sessionSecret: sessionSecret,
 	}
+}
+
+// generateSecureSecret generates a secure random string of the specified length
+func generateSecureSecret(length int) string {
+	const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()-_=+[]{}|;:,.<>?"
+	bytes := make([]byte, length)
+	if _, err := rand.Read(bytes); err != nil {
+		// Fallback to a less secure but still reasonably strong method
+		log.Printf("Warning: Could not generate secure random secret: %v", err)
+		return fmt.Sprintf("%d.%s", time.Now().UnixNano(), base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%d", time.Now().UnixNano()))))
+	}
+
+	for i, b := range bytes {
+		bytes[i] = chars[int(b)%len(chars)]
+	}
+	return string(bytes)
 }
 
 // Init initializes the authentication manager with OAuth providers
@@ -452,8 +476,18 @@ func (m *AuthManager) saveUserConfigs() error {
 		return fmt.Errorf("failed to marshal user configs: %w", err)
 	}
 
-	if err := os.WriteFile(filepath.Join(m.dataDir, "user_configs.json"), data, 0644); err != nil {
-		return fmt.Errorf("failed to write user configs file: %w", err)
+	configPath := filepath.Join(m.dataDir, "user_configs.json")
+
+	// Create the file with restricted permissions
+	// 0600 means read/write for owner only
+	file, err := os.OpenFile(configPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	if err != nil {
+		return fmt.Errorf("failed to open user configs file for writing: %w", err)
+	}
+	defer file.Close()
+
+	if _, err := file.Write(data); err != nil {
+		return fmt.Errorf("failed to write user configs data: %w", err)
 	}
 
 	return nil
@@ -519,6 +553,75 @@ func generateRandomState() (string, error) {
 		return "", err
 	}
 	return base64.URLEncoding.EncodeToString(b), nil
+}
+
+// generateAuthToken creates a secure authentication token
+func (m *AuthManager) generateAuthToken() (string, error) {
+	// Generate 32 bytes of random data for the token
+	tokenBytes := make([]byte, 32)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		return "", fmt.Errorf("failed to generate random token: %w", err)
+	}
+
+	// Convert to base64 for use in URLs and cookies
+	token := base64.URLEncoding.EncodeToString(tokenBytes)
+
+	// Add entropy with timestamp
+	timestamp := time.Now().UnixNano()
+	combined := fmt.Sprintf("%s.%d", token, timestamp)
+
+	// Hash the combined token for additional security
+	hash := sha256.Sum256([]byte(combined))
+	finalToken := fmt.Sprintf("%s.%x", token, hash[:8])
+
+	return finalToken, nil
+}
+
+// generateCSRFToken generates a token to prevent CSRF attacks
+func (m *AuthManager) generateCSRFToken(sessionID string) (string, error) {
+	// Generate 16 bytes of random data
+	csrfBytes := make([]byte, 16)
+	if _, err := rand.Read(csrfBytes); err != nil {
+		return "", fmt.Errorf("failed to generate CSRF token: %w", err)
+	}
+
+	// Create a token that includes the session ID to bind it to the session
+	rawToken := base64.StdEncoding.EncodeToString(csrfBytes)
+
+	// Create an HMAC of the raw token with the session ID as data
+	h := hmac.New(sha256.New, []byte(m.sessionSecret))
+	h.Write([]byte(sessionID))
+	h.Write([]byte(rawToken))
+	signature := h.Sum(nil)
+
+	// Combine token and signature
+	return fmt.Sprintf("%s.%s", rawToken, base64.URLEncoding.EncodeToString(signature[:10])), nil
+}
+
+// validateCSRFToken validates a CSRF token against a session
+func (m *AuthManager) validateCSRFToken(token, sessionID string) bool {
+	parts := strings.Split(token, ".")
+	if len(parts) != 2 {
+		return false
+	}
+
+	rawToken := parts[0]
+	signature := parts[1]
+
+	// Recreate the HMAC
+	h := hmac.New(sha256.New, []byte(m.sessionSecret))
+	h.Write([]byte(sessionID))
+	h.Write([]byte(rawToken))
+	expectedSig := h.Sum(nil)
+
+	// Decode the signature from the token
+	signatureBytes, err := base64.URLEncoding.DecodeString(signature)
+	if err != nil {
+		return false
+	}
+
+	// Compare signatures (length-constant time comparison)
+	return hmac.Equal(signatureBytes, expectedSig[:len(signatureBytes)])
 }
 
 // DefaultAuthManager is the default authentication manager

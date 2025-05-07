@@ -592,45 +592,351 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        // WebSocket connection for real-time updates
-        let ws;
+        // WebSocket connection management
+        let ws = null;
         let wsConnected = false;
-        let currentTaskId = null;
-        let currentUser = null;
+        let reconnectAttempts = 0;
+        const maxReconnectAttempts = 10;
+        let reconnectTimeout = 1000; // Start with 1 second, will increase with backoff
+        let heartbeatInterval = null;
+        let lastMessageTimestamp = 0;
+        let pendingMessages = []; // Store messages that couldn't be sent due to disconnection
+        let clientNonce = generateNonce(); // Used to prevent replay attacks
+        let serverTimeOffset = 0; // Time difference between client and server
         
-        // Check if authentication is enabled
-        let authEnabled = false;
-        
+        // Connect to WebSocket server
         function connectWebSocket() {
-            // Create WebSocket connection using the same host as the current page
+            if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) {
+                console.log('WebSocket connection already exists');
+                return;
+            }
+            
+            // Clean up any existing connection
+            if (ws) {
+                try {
+                    ws.close();
+                } catch (e) {
+                    console.error('Error closing existing websocket:', e);
+                }
+                ws = null;
+            }
+            
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//${window.location.host}/ws`;
             
-            ws = new WebSocket(wsUrl);
+            // Add authentication token if available
+            let wsUrl = `${protocol}//${window.location.host}/ws`;
+            const authToken = localStorage.getItem('auth_token');
             
-            ws.onopen = function() {
-                wsConnected = true;
-                console.log('WebSocket connection established');
-                addLogMessage('WebSocket connection established', 'info');
-            };
+            // Only include the token if it exists and using secure protocol,
+            // or if we're in a local development environment
+            if (authToken && (protocol === 'wss:' || 
+                window.location.hostname === 'localhost' || 
+                window.location.hostname === '127.0.0.1')) {
+                wsUrl += `?token=${encodeURIComponent(authToken)}`;
+            }
             
-            ws.onmessage = function(event) {
-                const message = JSON.parse(event.data);
-                handleWebSocketMessage(message);
-            };
+            console.log(`Connecting to WebSocket: ${wsUrl}`);
+            addLogMessage('Connecting to WebSocket server...', 'info');
             
-            ws.onclose = function() {
-                wsConnected = false;
-                console.log('WebSocket connection closed');
-                // Try to reconnect after a delay
-                setTimeout(connectWebSocket, 3000);
-            };
-            
-            ws.onerror = function(error) {
-                console.error('WebSocket error:', error);
-            };
+            try {
+                ws = new WebSocket(wsUrl);
+                
+                // Set a connection timeout
+                const connectionTimeout = setTimeout(() => {
+                    if (ws && ws.readyState !== WebSocket.OPEN) {
+                        console.error('WebSocket connection timeout');
+                        ws.close();
+                        handleReconnect();
+                    }
+                }, 10000); // 10 second timeout
+                
+                // Connection opened
+                ws.onopen = function() {
+                    clearTimeout(connectionTimeout);
+                    wsConnected = true;
+                    console.log('WebSocket connection established');
+                    addLogMessage('WebSocket connection established', 'success');
+                    
+                    // Reset reconnection state on successful connection
+                    reconnectAttempts = 0;
+                    reconnectTimeout = 1000;
+                    
+                    // Start sending heartbeats to keep connection alive
+                    startHeartbeat();
+                    
+                    // Send any pending messages that couldn't be sent while disconnected
+                    if (pendingMessages.length > 0) {
+                        console.log(`Sending ${pendingMessages.length} pending messages`);
+                        pendingMessages.forEach(msg => {
+                            sendWebSocketMessage(msg.type, msg.taskId, msg.content);
+                        });
+                        pendingMessages = [];
+                    }
+                };
+                
+                // Listen for messages
+                ws.onmessage = function(event) {
+                    try {
+                        const message = JSON.parse(event.data);
+                        
+                        // Validate message structure to prevent security issues
+                        if (!message || !message.type || typeof message.type !== 'string') {
+                            console.error('Invalid message format received');
+                            return;
+                        }
+                        
+                        // Update the last message timestamp
+                        lastMessageTimestamp = Date.now();
+                        
+                        // Handle different message types
+                        switch (message.type) {
+                            case 'connected':
+                                // Store server time for offset calculation
+                                if (message.content && message.content.serverTime) {
+                                    serverTimeOffset = message.content.serverTime - Date.now();
+                                    console.log(`Server time offset: ${serverTimeOffset}ms`);
+                                }
+                                break;
+                            
+                            case 'error':
+                                console.error('Server error:', message.content);
+                                addLogMessage(`Server error: ${message.content ? message.content.error || 'Unknown error' : 'Unknown error'}`, 'error');
+                                break;
+                                
+                            case 'pong':
+                                // Heartbeat response, no need to handle specially
+                                break;
+                                
+                            case 'shutdown':
+                                addLogMessage('Server is shutting down. Disconnecting...', 'warning');
+                                // Don't attempt to reconnect on clean shutdown
+                                wsConnected = false;
+                                ws.close();
+                                ws = null;
+                                stopHeartbeat();
+                                break;
+                                
+                            default:
+                                // Process other message types
+                                handleWebSocketMessage(message);
+                        }
+                    } catch (error) {
+                        console.error('Error parsing WebSocket message:', error, event.data);
+                        addLogMessage('Error processing server message', 'error');
+                    }
+                };
+                
+                // Connection closed
+                ws.onclose = function(event) {
+                    clearTimeout(connectionTimeout);
+                    wsConnected = false;
+                    stopHeartbeat();
+                    
+                    console.log(`WebSocket connection closed: ${event.code} - ${event.reason}`);
+                    
+                    // Don't attempt to reconnect on authentication failures or clean shutdowns
+                    if (event.code === 1008 || // Policy violation (auth failure)
+                        event.code === 1000) { // Normal closure (clean shutdown)
+                        addLogMessage(`WebSocket connection closed: ${event.reason || 'Server disconnected'}`, 'warning');
+                        return;
+                    }
+                    
+                    handleReconnect();
+                };
+                
+                // Connection error
+                ws.onerror = function(error) {
+                    console.error('WebSocket error:', error);
+                    addLogMessage('WebSocket connection error', 'error');
+                    // Error handling will be done by onclose
+                };
+            } catch (error) {
+                console.error('Error creating WebSocket connection:', error);
+                addLogMessage('Failed to create WebSocket connection', 'error');
+                handleReconnect();
+            }
         }
-
+        
+        // Handle reconnection with exponential backoff
+        function handleReconnect() {
+            if (reconnectAttempts >= maxReconnectAttempts) {
+                console.log('Maximum reconnection attempts reached');
+                addLogMessage('Failed to connect to server after multiple attempts', 'error');
+                return;
+            }
+            
+            reconnectAttempts++;
+            
+            // Exponential backoff with jitter
+            const jitter = Math.random() * 0.5 + 0.75; // Random between 0.75 and 1.25
+            const delay = Math.min(reconnectTimeout * jitter, 30000); // Cap at 30 seconds
+            
+            console.log(`Reconnecting in ${Math.round(delay / 1000)}s (attempt ${reconnectAttempts} of ${maxReconnectAttempts})`);
+            addLogMessage(`Reconnecting in ${Math.round(delay / 1000)} seconds...`, 'info');
+            
+            setTimeout(() => {
+                connectWebSocket();
+            }, delay);
+            
+            // Increase backoff for next attempt
+            reconnectTimeout = Math.min(reconnectTimeout * 2, 30000);
+        }
+        
+        // Start sending heartbeats
+        function startHeartbeat() {
+            stopHeartbeat(); // Clean up any existing interval
+            
+            heartbeatInterval = setInterval(() => {
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    sendWebSocketMessage('ping');
+                    
+                    // Check if we haven't received any message for a while
+                    if (lastMessageTimestamp > 0 && Date.now() - lastMessageTimestamp > 90000) {
+                        console.warn('No messages received for 90 seconds, reconnecting...');
+                        ws.close();
+                        connectWebSocket();
+                    }
+                } else {
+                    // WebSocket is not open, stop heartbeats
+                    stopHeartbeat();
+                }
+            }, 30000); // Send heartbeat every 30 seconds
+        }
+        
+        // Stop sending heartbeats
+        function stopHeartbeat() {
+            if (heartbeatInterval) {
+                clearInterval(heartbeatInterval);
+                heartbeatInterval = null;
+            }
+        }
+        
+        // Send a message to the WebSocket server
+        function sendWebSocketMessage(type, taskId = null, content = null) {
+            const message = {
+                type: type,
+                timestamp: Date.now() + serverTimeOffset, // Add server time offset
+                nonce: generateNonce() // Add a unique nonce to prevent replay attacks
+            };
+            
+            if (taskId) {
+                message.taskId = taskId;
+            }
+            
+            if (content) {
+                message.content = content;
+            }
+            
+            // Check if we're connected
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                try {
+                    ws.send(JSON.stringify(message));
+                    return true;
+                } catch (error) {
+                    console.error('Error sending WebSocket message:', error);
+                    addLogMessage('Error sending message to server', 'error');
+                    return false;
+                }
+            } else {
+                // Store message to send when reconnected
+                console.log('WebSocket not connected, queueing message:', message);
+                pendingMessages.push({
+                    type: type,
+                    taskId: taskId,
+                    content: content
+                });
+                
+                // Try to reconnect
+                if (!ws || ws.readyState === WebSocket.CLOSED) {
+                    connectWebSocket();
+                }
+                
+                return false;
+            }
+        }
+        
+        // Subscribe to a task's updates
+        function subscribeToTask(taskId) {
+            if (!taskId) return false;
+            return sendWebSocketMessage('subscribe', taskId);
+        }
+        
+        // Unsubscribe from a task's updates
+        function unsubscribeFromTask(taskId) {
+            if (!taskId) return false;
+            return sendWebSocketMessage('unsubscribe', taskId);
+        }
+        
+        // Generate a unique nonce for message security
+        function generateNonce() {
+            return Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+        }
+        
+        // Handle WebSocket messages from the server
+        function handleWebSocketMessage(message) {
+            console.log('Received WebSocket message:', message);
+            
+            // Process message based on type
+            switch(message.type) {
+                case 'authenticated':
+                    handleAuthenticationResponse(message);
+                    break;
+                    
+                case 'processingStarted':
+                    if (message.content && message.content.fileName) {
+                        addLogMessage(`Started processing ${message.content.fileName}`, 'info');
+                    }
+                    break;
+                    
+                case 'processingComplete':
+                    if (message.content && message.content.fileName) {
+                        addLogMessage(`Completed processing ${message.content.fileName}`, 'success');
+                        
+                        // Update UI for completed task
+                        if (message.taskId) {
+                            const resultUrl = message.content.resultUrl;
+                            if (resultUrl) {
+                                addFileResult(message.taskId, resultUrl, message.content);
+                            }
+                        }
+                    }
+                    break;
+                    
+                case 'processingError':
+                    if (message.content && message.content.error) {
+                        addLogMessage(`Processing error: ${message.content.error}`, 'error');
+                        
+                        // Update UI for failed task
+                        if (message.taskId && message.content.fileName) {
+                            markTaskFailed(message.taskId, message.content.error);
+                        }
+                    }
+                    break;
+                    
+                case 'processingProgress':
+                    if (message.content && message.content.progress) {
+                        // Update progress in the UI
+                        if (message.taskId) {
+                            updateTaskProgress(message.taskId, message.content.progress, message.content.status);
+                        }
+                    }
+                    break;
+                    
+                case 'serverStatus':
+                    updateServerStatus(message.content);
+                    break;
+                    
+                default:
+                    console.log('Received other message type:', message.type);
+            }
+        }
+        
+        // Connect WebSocket when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            // Delay WebSocket connection slightly to ensure UI is loaded first
+            setTimeout(connectWebSocket, 500);
+        });
+        
         // Auth functions
         function checkAuthStatus() {
             fetch('/api/auth/profile')
@@ -644,6 +950,13 @@
                     // User is authenticated
                     currentUser = user;
                     showUserSection(user);
+                    
+                    // Authenticate the WebSocket connection if it's open
+                    const authToken = localStorage.getItem('auth_token');
+                    if (authToken && ws && ws.readyState === WebSocket.OPEN) {
+                        authenticateWebSocket(authToken);
+                    }
+                    
                     // Load user's cloud storage settings
                     loadUserCloudConfig();
                 })
@@ -800,7 +1113,114 @@
         function handleWebSocketMessage(message) {
             console.log('Received WebSocket message:', message);
             
-            // ...existing WebSocket message handling code...
+            // Process message based on type
+            switch(message.type) {
+                case 'authenticated':
+                    handleAuthenticationResponse(message);
+                    break;
+                    
+                case 'processingStarted':
+                    if (message.content && message.content.fileName) {
+                        addLogMessage(`Started processing ${message.content.fileName}`, 'info');
+                    }
+                    break;
+                    
+                case 'processingComplete':
+                    if (message.content && message.content.fileName) {
+                        addLogMessage(`Completed processing ${message.content.fileName}`, 'success');
+                        
+                        // Update UI for completed task
+                        if (message.taskId) {
+                            const resultUrl = message.content.resultUrl;
+                            if (resultUrl) {
+                                addFileResult(message.taskId, resultUrl, message.content);
+                            }
+                        }
+                    }
+                    break;
+                    
+                case 'processingError':
+                    if (message.content && message.content.error) {
+                        addLogMessage(`Processing error: ${message.content.error}`, 'error');
+                        
+                        // Update UI for failed task
+                        if (message.taskId && message.content.fileName) {
+                            markTaskFailed(message.taskId, message.content.error);
+                        }
+                    }
+                    break;
+                    
+                case 'processingProgress':
+                    if (message.content && message.content.progress) {
+                        // Update progress in the UI
+                        if (message.taskId) {
+                            updateTaskProgress(message.taskId, message.content.progress, message.content.status);
+                        }
+                    }
+                    break;
+                    
+                case 'serverStatus':
+                    updateServerStatus(message.content);
+                    break;
+                    
+                default:
+                    console.log('Received other message type:', message.type);
+            }
+        }
+        
+        // WebSocket Authentication
+        function authenticateWebSocket(token) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                console.log('Cannot authenticate WebSocket: connection not open');
+                return false;
+            }
+            
+            return sendWebSocketMessage('authenticate', null, {
+                token: token
+            });
+        }
+        
+        // Handle authentication response
+        function handleAuthenticationResponse(message) {
+            if (message.content && message.content.success) {
+                console.log('WebSocket authenticated successfully');
+                // Update UI to reflect authenticated state if needed
+                if (message.content.name) {
+                    console.log(`Authenticated as: ${message.content.name}`);
+                    
+                    // Add authentication indicator to the UI if the user is already logged in
+                    if (document.getElementById('userSection').style.display !== 'none') {
+                        const authStatus = document.createElement('span');
+                        authStatus.className = 'badge bg-success ms-2';
+                        authStatus.textContent = 'Secure Connection';
+                        authStatus.id = 'wsAuthStatus';
+                        
+                        // Only add if it doesn't exist yet
+                        if (!document.getElementById('wsAuthStatus')) {
+                            document.getElementById('userName').parentNode.appendChild(authStatus);
+                        }
+                    }
+                }
+            } else {
+                console.error('WebSocket authentication failed:', 
+                    message.content ? message.content.error || 'Unknown error' : 'Unknown error');
+                
+                // Handle authentication failure gracefully - don't disconnect
+                // but mark the connection as less secure for the user
+                const authToken = localStorage.getItem('auth_token');
+                if (authToken && document.getElementById('userSection').style.display !== 'none') {
+                    // Show warning about insecure connection
+                    const authStatus = document.createElement('span');
+                    authStatus.className = 'badge bg-warning ms-2';
+                    authStatus.textContent = 'Insecure Connection';
+                    authStatus.id = 'wsAuthStatus';
+                    
+                    // Only add if it doesn't exist yet
+                    if (!document.getElementById('wsAuthStatus')) {
+                        document.getElementById('userName').parentNode.appendChild(authStatus);
+                    }
+                }
+            }
         }
         
         document.addEventListener('DOMContentLoaded', function() {
