@@ -495,7 +495,7 @@ func ServeWs(hub *WebSocketHub, w http.ResponseWriter, r *http.Request) {
 	authToken := r.URL.Query().Get("token")
 
 	// Check rate limiting by IP
-	clientIP := getClientIP(r)
+	clientIP := getClientIPFromRequest(r)
 	if hub.isRateLimited(clientIP) {
 		hub.stats.connectionsRejected++
 		http.Error(w, "Too many connections", http.StatusTooManyRequests)
@@ -818,7 +818,7 @@ func init() {
 }
 
 // Helper function to get client IP from request
-func getClientIP(r *http.Request) string {
+func getClientIPFromRequest(r *http.Request) string {
 	forwarded := r.Header.Get("X-Forwarded-For")
 	if forwarded != "" {
 		// X-Forwarded-For can contain multiple IPs, take the first one
@@ -846,7 +846,7 @@ func generateShortID() string {
 // Generate a secure client ID
 func generateClientID(r *http.Request) string {
 	// Start with IP and timestamp
-	baseInfo := fmt.Sprintf("%s-%d", getClientIP(r), time.Now().UnixNano())
+	baseInfo := fmt.Sprintf("%s-%d", getClientIPFromRequest(r), time.Now().UnixNano())
 
 	// Add a random component
 	randBytes := make([]byte, 8)
@@ -855,7 +855,7 @@ func generateClientID(r *http.Request) string {
 	// Hash everything together
 	hash := sha256.Sum256([]byte(baseInfo + string(randBytes) + r.UserAgent()))
 
-	return fmt.Sprintf("%s-%s", getClientIP(r), base64.RawURLEncoding.EncodeToString(hash[:8]))
+	return fmt.Sprintf("%s-%s", getClientIPFromRequest(r), base64.RawURLEncoding.EncodeToString(hash[:8]))
 }
 
 // validateAuthToken validates an authentication token and returns the user ID if valid
