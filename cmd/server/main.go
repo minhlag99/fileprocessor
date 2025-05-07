@@ -30,7 +30,8 @@ var (
 	configFile = flag.String("config", "fileprocessor.ini", "Configuration file path")
 	testConfig = flag.Bool("test-config", false, "Test configuration and exit")
 	verbose    = flag.Bool("verbose", false, "Enable verbose logging")
-	version    = "1.3.1" // Updated version number for the application
+	version    = "1.3.1"    // Updated version number for the application
+	startTime  = time.Now() // Track server start time for uptime reporting
 )
 
 // isPortInUse checks if the given port is already in use
@@ -112,9 +113,9 @@ func setupGlobalErrorHandling() {
 func checkDependencies() error {
 	// Check for required directories
 	requiredDirs := []string{
-		config.AppConfig.Storage.LocalDir,
+		config.AppConfig.Storage.Local.BasePath,
 		config.AppConfig.Server.UIDir,
-		config.AppConfig.Server.TempDir,
+		filepath.Join(config.AppConfig.Server.UploadsDir, "temp"), // Using uploads/temp as TempDir
 	}
 
 	for _, dir := range requiredDirs {
@@ -167,18 +168,18 @@ func validateConfiguration() error {
 	}
 
 	// Check TLS configuration consistency
-	if (config.AppConfig.Server.CertFile != "" && config.AppConfig.Server.KeyFile == "") ||
-		(config.AppConfig.Server.CertFile == "" && config.AppConfig.Server.KeyFile != "") {
+	if (config.AppConfig.SSL.CertFile != "" && config.AppConfig.SSL.KeyFile == "") ||
+		(config.AppConfig.SSL.CertFile == "" && config.AppConfig.SSL.KeyFile != "") {
 		return fmt.Errorf("inconsistent TLS configuration: both cert and key files must be specified")
 	}
 
 	// Validate that TLS certificates exist if specified
-	if config.AppConfig.Server.CertFile != "" && config.AppConfig.Server.KeyFile != "" {
-		if _, err := os.Stat(config.AppConfig.Server.CertFile); os.IsNotExist(err) {
-			return fmt.Errorf("certificate file not found: %s", config.AppConfig.Server.CertFile)
+	if config.AppConfig.SSL.CertFile != "" && config.AppConfig.SSL.KeyFile != "" {
+		if _, err := os.Stat(config.AppConfig.SSL.CertFile); os.IsNotExist(err) {
+			return fmt.Errorf("certificate file not found: %s", config.AppConfig.SSL.CertFile)
 		}
-		if _, err := os.Stat(config.AppConfig.Server.KeyFile); os.IsNotExist(err) {
-			return fmt.Errorf("key file not found: %s", config.AppConfig.Server.KeyFile)
+		if _, err := os.Stat(config.AppConfig.SSL.KeyFile); os.IsNotExist(err) {
+			return fmt.Errorf("key file not found: %s", config.AppConfig.SSL.KeyFile)
 		}
 	}
 
@@ -278,10 +279,10 @@ func main() {
 
 		// Get base URL for OAuth redirect
 		redirectURL := config.AppConfig.Auth.OAuthRedirectURL
-		if redirectURL == "" {
+		if (redirectURL == "") || (redirectURL == "http://localhost:8080/api/auth/callback") {
 			// Auto-configure redirect URL based on host and port
 			proto := "http"
-			if config.AppConfig.Server.CertFile != "" && config.AppConfig.Server.KeyFile != "" {
+			if config.AppConfig.SSL.CertFile != "" && config.AppConfig.SSL.KeyFile != "" {
 				proto = "https"
 			}
 			redirectURL = fmt.Sprintf("%s://%s:%d/api/auth/callback",
@@ -328,7 +329,7 @@ func main() {
 			// If using OAuth, update the redirectURL with the new port
 			if config.AppConfig.Features.EnableAuth {
 				proto := "http"
-				if config.AppConfig.Server.CertFile != "" && config.AppConfig.Server.KeyFile != "" {
+				if config.AppConfig.SSL.CertFile != "" && config.AppConfig.SSL.KeyFile != "" {
 					proto = "https"
 				}
 				// Only update if the redirect URL contains the original port
@@ -394,14 +395,14 @@ func main() {
 		log.Printf("Starting server on %s", addr)
 
 		var err error
-		if config.AppConfig.Server.CertFile != "" && config.AppConfig.Server.KeyFile != "" {
+		if config.AppConfig.SSL.CertFile != "" && config.AppConfig.SSL.KeyFile != "" {
 			// HTTPS server
 			log.Printf("Using TLS with cert file %s and key file %s",
-				config.AppConfig.Server.CertFile,
-				config.AppConfig.Server.KeyFile)
+				config.AppConfig.SSL.CertFile,
+				config.AppConfig.SSL.KeyFile)
 			err = server.ListenAndServeTLS(
-				config.AppConfig.Server.CertFile,
-				config.AppConfig.Server.KeyFile)
+				config.AppConfig.SSL.CertFile,
+				config.AppConfig.SSL.KeyFile)
 		} else {
 			// HTTP server
 			err = server.ListenAndServe()
@@ -491,14 +492,12 @@ func main() {
 
 // cleanupTempFiles removes temporary files created during operation
 func cleanupTempFiles() {
-	if config.AppConfig.Server.TempDir == "" {
-		return
-	}
+	tempDir := filepath.Join(config.AppConfig.Server.UploadsDir, "temp")
 
 	log.Println("Cleaning up temporary files...")
 
 	// Get all files in temp directory
-	files, err := os.ReadDir(config.AppConfig.Server.TempDir)
+	files, err := os.ReadDir(tempDir)
 	if err != nil {
 		log.Printf("Error reading temp directory: %v", err)
 		return
@@ -508,7 +507,7 @@ func cleanupTempFiles() {
 	count := 0
 	for _, file := range files {
 		if !file.IsDir() && strings.HasPrefix(file.Name(), "fp-temp-") {
-			err := os.Remove(filepath.Join(config.AppConfig.Server.TempDir, file.Name()))
+			err := os.Remove(filepath.Join(tempDir, file.Name()))
 			if err != nil {
 				log.Printf("Error removing temp file %s: %v", file.Name(), err)
 			} else {

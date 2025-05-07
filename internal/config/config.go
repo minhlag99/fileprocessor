@@ -481,6 +481,11 @@ func enforceMinimumTimeouts() {
 	}
 }
 
+// GetAddressString returns the server address as a string
+func GetAddressString() string {
+	return fmt.Sprintf("%s:%d", AppConfig.Server.Host, AppConfig.Server.Port)
+}
+
 // GetConfig returns a copy of the current configuration
 func GetConfig() Config {
 	return AppConfig

@@ -243,6 +243,9 @@ func (h *Handler) HandleCloudConfig(w http.ResponseWriter, r *http.Request) {
 // DefaultHandler is the default authentication handler
 var DefaultHandler = NewHandler(DefaultAuthManager)
 
+// DefaultAuthHandler is the default authentication handler - alias for DefaultHandler for backwards compatibility
+var DefaultAuthHandler = DefaultHandler
+
 // LoginHandler handles OAuth login requests
 func LoginHandler(w http.ResponseWriter, r *http.Request) {
 	// Get the provider from the query string
