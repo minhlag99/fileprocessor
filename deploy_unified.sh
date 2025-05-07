@@ -490,13 +490,21 @@ build_application() {
     go mod tidy
     
     echo -e "   Building application..."
-    go build -o $APP_NAME cmd/server/main.go
+    # Build with explicit module path - this ensures proper import resolution
+    go build -mod=mod -o $APP_NAME ./cmd/server/main.go
     
     if [ $? -eq 0 ]; then
         echo -e "   ${GREEN}✓${NC} Application built successfully"
     else
         echo -e "   ${RED}✗${NC} Build failed"
         echo -e "   Checking logs and attempting to diagnose the issue..."
+        
+        # Additional diagnostic steps for build failures
+        echo -e "   Running go list to check module configuration..."
+        go list -m all
+        
+        echo -e "   Checking if import paths are correct..."
+        grep -r "import" --include="*.go" ./internal
         
         # Check for common build errors and provide guidance
         if [ -f "$APP_DIR/logs/error.log" ]; then

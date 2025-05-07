@@ -5,6 +5,7 @@ go 1.24.2
 require (
 	cloud.google.com/go/storage v1.52.0
 	github.com/aws/aws-sdk-go v1.55.7
+	github.com/gorilla/mux v1.8.1
 	github.com/gorilla/websocket v1.5.3
 	github.com/unidoc/unioffice v1.39.0
 	golang.org/x/oauth2 v0.29.0
