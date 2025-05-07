@@ -57,6 +57,15 @@ echo -e "${BLUE}============================================${NC}"
 echo -e "${BLUE}      Go File Processor Deployment Tool     ${NC}"
 echo -e "${BLUE}============================================${NC}"
 
+# Function to print the banner
+print_banner() {
+    echo -e "${YELLOW}"
+    echo "╔════════════════════════════════════════════════════════╗"
+    echo "║       Go File Processor Deployment Tool                ║"
+    echo "╚════════════════════════════════════════════════════════╝"
+    echo -e "${NC}"
+}
+
 # Function to prompt for deployment mode
 select_deployment_mode() {
     echo -e "\n${YELLOW}Select deployment mode:${NC}"
