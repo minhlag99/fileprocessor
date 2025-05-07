@@ -14,6 +14,9 @@ type Handler struct {
 	authManager *AuthManager
 }
 
+// AuthHandler is an alias for Handler to maintain backward compatibility
+type AuthHandler = Handler
+
 // NewHandler creates a new authentication handler
 func NewHandler(manager *AuthManager) *Handler {
 	if manager == nil {
