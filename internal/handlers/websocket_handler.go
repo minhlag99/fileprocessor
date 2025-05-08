@@ -684,7 +684,8 @@ func (c *Client) readPump() {
 		}
 
 		// Handle message based on type
-		switch clientMsg.Type {		case "subscribe":
+		switch clientMsg.Type {
+		case "subscribe":
 			if clientMsg.TaskID != "" {
 				log.Printf("Client %s subscribing to task %s", c.clientID, clientMsg.TaskID)
 				c.hub.Subscribe(c.clientID, clientMsg.TaskID)
@@ -694,16 +695,16 @@ func (c *Client) readPump() {
 					Timestamp: time.Now().UnixNano() / int64(time.Millisecond),
 					RequestID: generateShortID(),
 				}
-				
+
 				// Send current task status to the client immediately
 				// This helps clients that subscribe after processing has already started
 				log.Printf("Checking for existing task status for task %s", clientMsg.TaskID)
-				
+
 				// Send a confirmation processing_progress at 50% to ensure client shows processing
 				c.send <- ServerMessage{
-					Type:    "processing_progress",
-					TaskID:  clientMsg.TaskID,
-					Content: map[string]interface{}{"progress": 50},
+					Type:      "processing_progress",
+					TaskID:    clientMsg.TaskID,
+					Content:   map[string]interface{}{"progress": 50},
 					Timestamp: time.Now().UnixNano() / int64(time.Millisecond),
 					RequestID: generateShortID(),
 				}

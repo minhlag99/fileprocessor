@@ -151,14 +151,14 @@ func (p *WorkerPool) worker(id int) {
 	for {
 		select {
 		case task := <-p.tasks:
-			log.Printf("Worker %d processing task %s", id, task.ID)			// Process the task
+			log.Printf("Worker %d processing task %s", id, task.ID) // Process the task
 			result, err := task.Process()
 
 			// Send completion notification before cleanup
 			if err != nil {
-				log.Printf("Worker %d failed task %s: %v", id, task.ID, err)				// Mark task status as error
+				log.Printf("Worker %d failed task %s: %v", id, task.ID, err) // Mark task status as error
 				task.Status = "error"
-				
+
 				// Make sure error is propagated to any task status listeners
 				select {
 				case task.UpdateChan <- map[string]interface{}{
@@ -179,9 +179,9 @@ func (p *WorkerPool) worker(id int) {
 					log.Printf("Warning: Error channel for task %s is full or closed", task.ID)
 				}
 			} else {
-				log.Printf("Worker %d completed task %s", id, task.ID)				// Mark task status as complete
+				log.Printf("Worker %d completed task %s", id, task.ID) // Mark task status as complete
 				task.Status = "complete"
-				
+
 				// Make sure completion is propagated to any task status listeners
 				select {
 				case task.UpdateChan <- map[string]interface{}{

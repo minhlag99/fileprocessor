@@ -208,16 +208,16 @@ func (h *FileHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 				GeneratePreview: true,
 				ExtractMetadata: true,
 				MaxPreviewSize:  1024 * 10, // 10KB
-			}			// Send processing started notification via WebSocket
+			} // Send processing started notification via WebSocket
 			DefaultWebSocketHub.Broadcast("processing_started", map[string]interface{}{
 				"taskId": taskID,
 				"file":   fileModel,
 			})
-			
+
 			// Create a context with cancellation for the progress reporter
 			progressCtx, cancelProgress := context.WithCancel(context.Background())
 			defer cancelProgress()
-					// Report progress updates with ability to stop when processing completes
+			// Report progress updates with ability to stop when processing completes
 			go func() {
 				progress := 0
 				ticker := time.NewTicker(500 * time.Millisecond)
@@ -250,7 +250,7 @@ func (h *FileHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 			}()
 
 			// Do the actual processing
-			result, err := processor.Process(r.Context(), reader, fileModel.Name, options)			// Cancel progress reporting goroutine immediately before sending completion
+			result, err := processor.Process(r.Context(), reader, fileModel.Name, options) // Cancel progress reporting goroutine immediately before sending completion
 			cancelProgress()
 
 			// Send completion notification via WebSocket
