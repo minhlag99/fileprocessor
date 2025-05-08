@@ -880,6 +880,12 @@ func validateAuthToken(token string) string {
 		return ""
 	}
 
+	// If authentication is disabled, bypass the check
+	if !config.AppConfig.Features.EnableAuth {
+		// Return a default anonymous user ID since auth is disabled
+		return "anonymous"
+	}
+
 	// Attempt to get user from the auth system
 	user, err := auth.DefaultAuthManager.GetUserBySession(token)
 	if err != nil {

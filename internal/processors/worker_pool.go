@@ -156,19 +156,46 @@ func (p *WorkerPool) worker(id int) {
 			// Process the task
 			result, err := task.Process()
 
-			// Update status
+			// Send completion notification before cleanup
+			if err != nil {
+				log.Printf("Worker %d failed task %s: %v", id, task.ID, err)
+
+				// Make sure error is propagated to any task status listeners
+				select {
+				case task.UpdateChan <- map[string]interface{}{
+					"status":   "error",
+					"error":    err.Error(),
+					"progress": 100,
+				}:
+				default:
+					log.Printf("Warning: Couldn't send error update for task %s", task.ID)
+				}
+
+				task.Error <- err
+			} else {
+				log.Printf("Worker %d completed task %s", id, task.ID)
+
+				// Make sure completion is propagated to any task status listeners
+				select {
+				case task.UpdateChan <- map[string]interface{}{
+					"status":   "complete",
+					"progress": 100,
+					"result":   result,
+				}:
+				default:
+					log.Printf("Warning: Couldn't send completion update for task %s", task.ID)
+				}
+
+				task.Result <- result
+			}
+
+			// Update status in map
 			p.mu.Lock()
 			delete(p.active, task.ID)
 			p.mu.Unlock()
 
-			// Send result or error
-			if err != nil {
-				log.Printf("Worker %d failed task %s: %v", id, task.ID, err)
-				task.Error <- err
-			} else {
-				log.Printf("Worker %d completed task %s", id, task.ID)
-				task.Result <- result
-			}
+			// Close update channel to signal no more updates
+			close(task.UpdateChan)
 		case <-p.quit:
 			log.Printf("Worker %d stopping", id)
 			return

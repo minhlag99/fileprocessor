@@ -225,18 +225,17 @@ function question(query, validator = null) {
 function checkAdminPrivileges() {
   try {
     if (isWindows) {
-      // On Windows, try to write to a protected location
-      const testFile = path.join(process.env.windir || 'C:\\Windows', 'temp_admin_check');
-      try {
-        fs.writeFileSync(testFile, 'test');
-        fs.unlinkSync(testFile);
-        return true;
-      } catch (error) {
-        return false;
-      }
+      // On Windows, we no longer require admin privileges
+      console.log(`${colors.green}Windows detected - admin privileges not required${colors.reset}`);
+      return true;
     } else {
       // On Unix, check if user is root or sudo
-      return process.getuid && process.getuid() === 0;
+      const isRoot = process.getuid && process.getuid() === 0;
+      if (!isRoot) {
+        console.log(`${colors.yellow}Linux/Unix detected - sudo privileges required for proper operation${colors.reset}`);
+        console.log(`${colors.yellow}Some features may not work correctly without sudo${colors.reset}`);
+      }
+      return isRoot;
     }
   } catch (error) {
     return false;

@@ -146,6 +146,54 @@
             border-radius: 0.25rem;
             box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
         }
+        /* Enhanced Speedometer styles */
+        .speedometer-container {
+            display: flex;
+            justify-content: space-around;
+            margin: 15px 0;
+        }
+        .speedometer {
+            position: relative;
+            width: 150px;
+            height: 110px; /* Increased height to fit larger value display */
+            text-align: center;
+            font-family: Arial, sans-serif;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            padding: 8px;
+            background-color: #f8f9fa;
+        }
+        .speedometer-title {
+            font-size: 0.9rem;
+            color: #495057;
+            font-weight: bold;
+            margin-bottom: 8px;
+            border-bottom: 1px solid #dee2e6;
+            padding-bottom: 5px;
+        }
+        .speedometer-dial {
+            position: relative;
+            width: 120px;
+            height: 10px;
+            background: linear-gradient(to right, #198754, #ffc107, #dc3545);
+            border-radius: 5px;
+            margin: 0 auto;
+        }
+        .speedometer-needle {
+            display: none; /* Hide the needle visual */
+        }
+        .speedometer-value {
+            font-size: 1.8rem;
+            font-weight: bold;
+            margin: 15px 0 5px 0;
+            color: #0d6efd;
+            text-align: center;
+        }
+        .speedometer-unit {
+            font-size: 0.9rem;
+            font-weight: normal;
+            color: #6c757d;
+        }
         /* Auth styles */
         .user-avatar {
             width: 32px;
@@ -181,12 +229,12 @@
 </head>
 <body>
     <div class="container">
-        <!-- Admin privilege notification alert -->
-        <div class="row mb-3">
+        <!-- OS-specific privilege notification alert -->
+        <div class="row mb-3" id="adminAlertRow">
             <div class="col">
-                <div class="admin-alert">
+                <div class="admin-alert" id="linuxAdminAlert" style="display: none;">
                     <span class="admin-alert-icon">⚠️</span>
-                    This application requires administrator privileges to run properly. Please make sure to run the server using the start_server.bat file with "Run as administrator" option.
+                    On Linux/Unix systems, this application requires sudo privileges to run properly. Please make sure to run the server with sudo when on Linux.
                 </div>
             </div>
         </div>
@@ -278,7 +326,7 @@
                                 </div>
                                 <div class="mb-3">
                                     <label for="userS3SecretKey" class="form-label">Secret Key</label>
-                                    <input type="password" class="form-control" id="userS3SecretKey" placeholder="AWS secret key">
+                                    <input type="password" class="form-control" id="userS3SecretKey" placeholder="AWS secret key" autocomplete="current-password">
                                 </div>
                                 <div class="mb-3">
                                     <label for="userS3Prefix" class="form-label">Prefix (Optional)</label>
@@ -390,7 +438,7 @@
                                 </div>
                                 <div class="mb-2">
                                     <label for="s3SecretKey" class="form-label">Secret Key</label>
-                                    <input type="password" class="form-control" id="s3SecretKey" placeholder="AWS secret key">
+                                    <input type="password" class="form-control" id="s3SecretKey" placeholder="AWS secret key" autocomplete="current-password">
                                 </div>
                                 <div class="mb-2">
                                     <label for="s3Prefix" class="form-label">Prefix (Optional)</label>
@@ -445,6 +493,28 @@
                                 <div class="progress-bar" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
                             </div>
                             <div id="progressMessage" class="mb-2">Waiting for upload...</div>
+                            
+                            <!-- Speedometer display for upload/download speeds -->
+                            <div class="speedometer-container mb-3">
+                                <div class="speedometer">
+                                    <div class="speedometer-title">Upload Speed</div>
+                                    <div class="speedometer-dial">
+                                        <div class="speedometer-needle" id="uploadSpeedNeedle"></div>
+                                        <div class="speedometer-center"></div>
+                                    </div>
+                                    <div class="speedometer-value" id="uploadSpeedValue">0 <span class="speedometer-unit">KB/s</span></div>
+                                </div>
+                                
+                                <div class="speedometer">
+                                    <div class="speedometer-title">Download Speed</div>
+                                    <div class="speedometer-dial">
+                                        <div class="speedometer-needle" id="downloadSpeedNeedle"></div>
+                                        <div class="speedometer-center"></div>
+                                    </div>
+                                    <div class="speedometer-value" id="downloadSpeedValue">0 <span class="speedometer-unit">KB/s</span></div>
+                                </div>
+                            </div>
+                            
                             <div id="realTimeLog"></div>
                         </div>
                     </div>
@@ -509,7 +579,7 @@
                             </div>
                             <div class="mb-2">
                                 <label for="s3ListSecretKey" class="form-label">Secret Key</label>
-                                <input type="password" class="form-control" id="s3ListSecretKey" placeholder="AWS secret key">
+                                <input type="password" class="form-control" id="s3ListSecretKey" placeholder="AWS secret key" autocomplete="current-password">
                             </div>
                             <div class="mb-2">
                                 <label for="s3ListPrefix" class="form-label">Prefix (Optional)</label>
@@ -548,8 +618,7 @@
                             </thead>
                             <tbody id="fileList">
                                 <tr>
-                                    <td colspan="4" class="text-center">No files to display</td>
-                                </tr>
+                                    <td colspan="4" class="text-center">No files to display</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -882,42 +951,50 @@
                     handleAuthenticationResponse(message);
                     break;
                     
-                case 'processingStarted':
-                    if (message.content && message.content.fileName) {
-                        addLogMessage(`Started processing ${message.content.fileName}`, 'info');
-                    }
-                    break;
-                    
-                case 'processingComplete':
-                    if (message.content && message.content.fileName) {
-                        addLogMessage(`Completed processing ${message.content.fileName}`, 'success');
+                case 'processing_started':
+                    if (message.content && message.content.file) {
+                        addLogMessage(`Started processing ${message.content.file.Name}`, 'info');
                         
-                        // Update UI for completed task
-                        if (message.taskId) {
-                            const resultUrl = message.content.resultUrl;
-                            if (resultUrl) {
-                                addFileResult(message.taskId, resultUrl, message.content);
-                            }
+                        // Update UI to show processing has started
+                        const progressBar = document.querySelector('.progress-bar');
+                        if (progressBar && progressBar.dataset.taskId === message.taskId) {
+                            document.getElementById('progressMessage').textContent = 'Processing started...';
                         }
                     }
                     break;
                     
-                case 'processingError':
+                case 'processing_progress':
+                    if (message.content && message.content.progress) {
+                        const progress = message.content.progress;
+                        const fileName = message.content.file ? message.content.file.Name : '';
+                        
+                        addLogMessage(`Processing progress: ${progress}% - ${fileName}`, 'info');
+                        
+                        // Update progress bar (scale from 33% to 90%)
+                        updateTaskProgress(message.taskId, progress, `Processing: ${progress}%`);
+                    }
+                    break;
+                    
+                case 'processing_completed':
+                    if (message.content && message.content.file) {
+                        const fileName = message.content.file.Name;
+                        addLogMessage(`Completed processing ${fileName}`, 'success');
+                        
+                        // Create download link for the processed file
+                        const downloadUrl = `/api/download?id=${message.content.file.StorageID}&storageType=${message.content.file.StorageType}`;
+                        
+                        // Mark task as complete in UI
+                        markTaskComplete(message.taskId, downloadUrl, message.content);
+                    }
+                    break;
+                    
+                case 'processing_failed':
                     if (message.content && message.content.error) {
                         addLogMessage(`Processing error: ${message.content.error}`, 'error');
                         
                         // Update UI for failed task
-                        if (message.taskId && message.content.fileName) {
+                        if (message.taskId && message.content.file) {
                             markTaskFailed(message.taskId, message.content.error);
-                        }
-                    }
-                    break;
-                    
-                case 'processingProgress':
-                    if (message.content && message.content.progress) {
-                        // Update progress in the UI
-                        if (message.taskId) {
-                            updateTaskProgress(message.taskId, message.content.progress, message.content.status);
                         }
                     }
                     break;
@@ -933,354 +1010,20 @@
         
         // Connect WebSocket when page loads
         document.addEventListener('DOMContentLoaded', function() {
-            // Delay WebSocket connection slightly to ensure UI is loaded first
-            setTimeout(connectWebSocket, 500);
-        });
-        
-        // Auth functions
-        function checkAuthStatus() {
-            fetch('/api/auth/profile')
-                .then(response => {
-                    if (response.ok) {
-                        return response.json();
-                    }
-                    throw new Error('Not authenticated');
-                })
-                .then(user => {
-                    // User is authenticated
-                    currentUser = user;
-                    showUserSection(user);
-                    
-                    // Authenticate the WebSocket connection if it's open
-                    const authToken = localStorage.getItem('auth_token');
-                    if (authToken && ws && ws.readyState === WebSocket.OPEN) {
-                        authenticateWebSocket(authToken);
-                    }
-                    
-                    // Load user's cloud storage settings
-                    loadUserCloudConfig();
-                })
-                .catch(error => {
-                    // User is not authenticated
-                    document.getElementById('loginSection').style.display = 'block';
-                    document.getElementById('userSection').style.display = 'none';
-                });
-        }
-
-        function showUserSection(user) {
-            document.getElementById('loginSection').style.display = 'none';
-            document.getElementById('userSection').style.display = 'flex';
-            document.getElementById('userName').textContent = user.name;
-            document.getElementById('userAvatar').src = user.avatarURL || '/images/default-avatar.png';
-            
-            // Also update profile section
-            document.getElementById('profileName').textContent = user.name;
-            document.getElementById('profileEmail').textContent = user.email;
-            document.getElementById('profileAvatar').src = user.avatarURL || '/images/default-avatar.png';
-            document.getElementById('profileProvider').textContent = `Authentication Provider: ${user.provider}`;
-        }
-
-        function login() {
-            fetch('/api/auth/login?provider=google')
-                .then(response => response.json())
-                .then(data => {
-                    // Redirect to the OAuth provider login page
-                    window.location.href = data.url;
-                })
-                .catch(error => {
-                    console.error('Login error:', error);
-                    alert('Failed to initiate login. Please try again.');
-                });
-        }
-
-        function logout() {
-            fetch('/api/auth/logout', {
-                method: 'POST',
-            })
-            .then(() => {
-                // Clear user info and show login section
-                currentUser = null;
-                document.getElementById('loginSection').style.display = 'block';
-                document.getElementById('userSection').style.display = 'none';
-                document.getElementById('userProfileCard').style.display = 'none';
-                document.getElementById('cloudConfigCard').style.display = 'none';
-            })
-            .catch(error => {
-                console.error('Logout error:', error);
-            });
-        }
-
-        function loadUserCloudConfig() {
-            // Load S3 config
-            fetch('/api/auth/cloud-config?provider=s3')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.config) {
-                        // Populate S3 config form
-                        document.getElementById('userS3Region').value = data.config.region || '';
-                        document.getElementById('userS3Bucket').value = data.config.bucket || '';
-                        document.getElementById('userS3AccessKey').value = data.config.accessKey || '';
-                        document.getElementById('userS3SecretKey').value = data.config.secretKey || '';
-                        document.getElementById('userS3Prefix').value = data.config.prefix || '';
-                        
-                        // Also update the main S3 form if user is logged in
-                        document.getElementById('s3Region').value = data.config.region || '';
-                        document.getElementById('s3Bucket').value = data.config.bucket || '';
-                        document.getElementById('s3AccessKey').value = data.config.accessKey || '';
-                        document.getElementById('s3SecretKey').value = data.config.secretKey || '';
-                        document.getElementById('s3Prefix').value = data.config.prefix || '';
-                        
-                        // And the list form
-                        document.getElementById('s3ListRegion').value = data.config.region || '';
-                        document.getElementById('s3ListBucket').value = data.config.bucket || '';
-                        document.getElementById('s3ListAccessKey').value = data.config.accessKey || '';
-                        document.getElementById('s3ListSecretKey').value = data.config.secretKey || '';
-                        document.getElementById('s3ListPrefix').value = data.config.prefix || '';
-                    }
-                })
-                .catch(error => console.error('Error loading S3 config:', error));
-            
-            // Load GCS config
-            fetch('/api/auth/cloud-config?provider=google')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.config) {
-                        // Populate GCS config form
-                        document.getElementById('userGcsBucket').value = data.config.bucket || '';
-                        document.getElementById('userGcsCredFile').value = data.config.credentialFile || '';
-                        document.getElementById('userGcsPrefix').value = data.config.prefix || '';
-                        
-                        // Also update the main GCS form if user is logged in
-                        document.getElementById('gcsBucket').value = data.config.bucket || '';
-                        document.getElementById('gcsCredFile').value = data.config.credentialFile || '';
-                        document.getElementById('gcsPrefix').value = data.config.prefix || '';
-                        
-                        // And the list form
-                        document.getElementById('gcsListBucket').value = data.config.bucket || '';
-                        document.getElementById('gcsListCredFile').value = data.config.credentialFile || '';
-                        document.getElementById('gcsListPrefix').value = data.config.prefix || '';
-                    }
-                })
-                .catch(error => console.error('Error loading GCS config:', error));
-        }
-
-        function saveCloudConfig(provider, config) {
-            fetch(`/api/auth/cloud-config?provider=${provider}`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(config)
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    alert(`${provider.toUpperCase()} settings saved successfully`);
-                    
-                    // Update main forms with these settings
-                    if (provider === 's3') {
-                        document.getElementById('s3Region').value = config.region || '';
-                        document.getElementById('s3Bucket').value = config.bucket || '';
-                        document.getElementById('s3AccessKey').value = config.accessKey || '';
-                        document.getElementById('s3SecretKey').value = config.secretKey || '';
-                        document.getElementById('s3Prefix').value = config.prefix || '';
-                        
-                        document.getElementById('s3ListRegion').value = config.region || '';
-                        document.getElementById('s3ListBucket').value = config.bucket || '';
-                        document.getElementById('s3ListAccessKey').value = config.accessKey || '';
-                        document.getElementById('s3ListSecretKey').value = config.secretKey || '';
-                        document.getElementById('s3ListPrefix').value = config.prefix || '';
-                    } else if (provider === 'google') {
-                        document.getElementById('gcsBucket').value = config.bucket || '';
-                        document.getElementById('gcsCredFile').value = config.credentialFile || '';
-                        document.getElementById('gcsPrefix').value = config.prefix || '';
-                        
-                        document.getElementById('gcsListBucket').value = config.bucket || '';
-                        document.getElementById('gcsListCredFile').value = config.credentialFile || '';
-                        document.getElementById('gcsListPrefix').value = config.prefix || '';
-                    }
-                } else {
-                    alert(`Failed to save ${provider.toUpperCase()} settings`);
-                }
-            })
-            .catch(error => {
-                console.error(`Error saving ${provider} config:`, error);
-                alert(`Error saving ${provider.toUpperCase()} settings`);
-            });
-        }
-        
-        // Handle different types of WebSocket messages
-        function handleWebSocketMessage(message) {
-            console.log('Received WebSocket message:', message);
-            
-            // Process message based on type
-            switch(message.type) {
-                case 'authenticated':
-                    handleAuthenticationResponse(message);
-                    break;
-                    
-                case 'processingStarted':
-                    if (message.content && message.content.fileName) {
-                        addLogMessage(`Started processing ${message.content.fileName}`, 'info');
-                    }
-                    break;
-                    
-                case 'processingComplete':
-                    if (message.content && message.content.fileName) {
-                        addLogMessage(`Completed processing ${message.content.fileName}`, 'success');
-                        
-                        // Update UI for completed task
-                        if (message.taskId) {
-                            const resultUrl = message.content.resultUrl;
-                            if (resultUrl) {
-                                addFileResult(message.taskId, resultUrl, message.content);
-                            }
-                        }
-                    }
-                    break;
-                    
-                case 'processingError':
-                    if (message.content && message.content.error) {
-                        addLogMessage(`Processing error: ${message.content.error}`, 'error');
-                        
-                        // Update UI for failed task
-                        if (message.taskId && message.content.fileName) {
-                            markTaskFailed(message.taskId, message.content.error);
-                        }
-                    }
-                    break;
-                    
-                case 'processingProgress':
-                    if (message.content && message.content.progress) {
-                        // Update progress in the UI
-                        if (message.taskId) {
-                            updateTaskProgress(message.taskId, message.content.progress, message.content.status);
-                        }
-                    }
-                    break;
-                    
-                case 'serverStatus':
-                    updateServerStatus(message.content);
-                    break;
-                    
-                default:
-                    console.log('Received other message type:', message.type);
-            }
-        }
-        
-        // WebSocket Authentication
-        function authenticateWebSocket(token) {
-            if (!ws || ws.readyState !== WebSocket.OPEN) {
-                console.log('Cannot authenticate WebSocket: connection not open');
-                return false;
-            }
-            
-            return sendWebSocketMessage('authenticate', null, {
-                token: token
-            });
-        }
-        
-        // Handle authentication response
-        function handleAuthenticationResponse(message) {
-            if (message.content && message.content.success) {
-                console.log('WebSocket authenticated successfully');
-                // Update UI to reflect authenticated state if needed
-                if (message.content.name) {
-                    console.log(`Authenticated as: ${message.content.name}`);
-                    
-                    // Add authentication indicator to the UI if the user is already logged in
-                    if (document.getElementById('userSection').style.display !== 'none') {
-                        const authStatus = document.createElement('span');
-                        authStatus.className = 'badge bg-success ms-2';
-                        authStatus.textContent = 'Secure Connection';
-                        authStatus.id = 'wsAuthStatus';
-                        
-                        // Only add if it doesn't exist yet
-                        if (!document.getElementById('wsAuthStatus')) {
-                            document.getElementById('userName').parentNode.appendChild(authStatus);
-                        }
-                    }
-                }
+            // Check OS and show appropriate admin alert
+            const isWindows = navigator.platform.toLowerCase().includes('win');
+            if (!isWindows) {
+                // Show Linux admin alert
+                document.getElementById('linuxAdminAlert').style.display = 'block';
             } else {
-                console.error('WebSocket authentication failed:', 
-                    message.content ? message.content.error || 'Unknown error' : 'Unknown error');
-                
-                // Handle authentication failure gracefully - don't disconnect
-                // but mark the connection as less secure for the user
-                const authToken = localStorage.getItem('auth_token');
-                if (authToken && document.getElementById('userSection').style.display !== 'none') {
-                    // Show warning about insecure connection
-                    const authStatus = document.createElement('span');
-                    authStatus.className = 'badge bg-warning ms-2';
-                    authStatus.textContent = 'Insecure Connection';
-                    authStatus.id = 'wsAuthStatus';
-                    
-                    // Only add if it doesn't exist yet
-                    if (!document.getElementById('wsAuthStatus')) {
-                        document.getElementById('userName').parentNode.appendChild(authStatus);
-                    }
-                }
+                // Remove admin alert row for Windows
+                document.getElementById('adminAlertRow').style.display = 'none';
             }
-        }
-        
-        document.addEventListener('DOMContentLoaded', function() {
-            // Check authentication status
-            checkAuthStatus();
             
-            // Attach event listeners for authentication
-            document.getElementById('loginButton').addEventListener('click', login);
-            document.getElementById('logoutLink').addEventListener('click', function(e) {
-                e.preventDefault();
-                logout();
-            });
+            // Initialize without authentication
+            hideAuthElements();
             
-            document.getElementById('profileLink').addEventListener('click', function(e) {
-                e.preventDefault();
-                document.getElementById('userProfileCard').style.display = 'block';
-                document.getElementById('cloudConfigCard').style.display = 'none';
-            });
-            
-            document.getElementById('cloudConfigLink').addEventListener('click', function(e) {
-                e.preventDefault();
-                document.getElementById('cloudConfigCard').style.display = 'block';
-                document.getElementById('userProfileCard').style.display = 'none';
-            });
-            
-            document.getElementById('manageCloudStorageButton').addEventListener('click', function(e) {
-                e.preventDefault();
-                document.getElementById('cloudConfigCard').style.display = 'block';
-                document.getElementById('userProfileCard').style.display = 'none';
-            });
-            
-            document.getElementById('closeCloudConfigButton').addEventListener('click', function() {
-                document.getElementById('cloudConfigCard').style.display = 'none';
-            });
-            
-            // Handle form submissions for cloud config
-            document.getElementById('s3ConfigForm').addEventListener('submit', function(e) {
-                e.preventDefault();
-                const config = {
-                    region: document.getElementById('userS3Region').value,
-                    bucket: document.getElementById('userS3Bucket').value,
-                    accessKey: document.getElementById('userS3AccessKey').value,
-                    secretKey: document.getElementById('userS3SecretKey').value,
-                    prefix: document.getElementById('userS3Prefix').value
-                };
-                saveCloudConfig('s3', config);
-            });
-            
-            document.getElementById('gcsConfigForm').addEventListener('submit', function(e) {
-                e.preventDefault();
-                const config = {
-                    bucket: document.getElementById('userGcsBucket').value,
-                    credentialFile: document.getElementById('userGcsCredFile').value,
-                    prefix: document.getElementById('userGcsPrefix').value
-                };
-                saveCloudConfig('google', config);
-            });
-            
-            // Rest of the initialization code (WebSockets, UI, etc.)
-            fetchProviderStatus();
+            // Connect WebSocket
             connectWebSocket();
             
             // Show/hide storage provider config based on selection
@@ -1308,8 +1051,19 @@
                 }
             });
             
-            // Existing code for file uploads, processing, etc.
-            // ...rest of the existing JavaScript...
+            // Initialize fetch provider status
+            fetchProviderStatus();
+            
+            // Initialize file upload form
+            initFileUpload();
+            
+            // Initialize file listing
+            document.getElementById('fetchFileList').addEventListener('click', fetchFileList);
+            document.getElementById('refreshFiles').addEventListener('click', fetchFileList);
+            
+            // Initialize LAN discovery
+            document.getElementById('discoverPeers').addEventListener('click', discoverPeers);
+            document.getElementById('lanSection').style.display = 'block';
         });
         
         // Fetch storage provider status
@@ -1334,6 +1088,499 @@
         }
         
         // Rest of existing functions...
+        
+        // Dummy checkAuthStatus function - Authentication disabled
+        function checkAuthStatus() {
+            console.log('Authentication disabled');
+            return false;
+        }
+
+        // Hide authentication-related UI elements
+        function hideAuthElements() {
+            // Hide authentication UI
+            document.getElementById('userAuthSection').style.display = 'none';
+            document.getElementById('userProfileCard').style.display = 'none';
+            document.getElementById('cloudConfigCard').style.display = 'none';
+        }
+
+        // Dummy authentication response handler (prevents errors)
+        function handleAuthenticationResponse(message) {
+            console.log('Authentication response received (disabled):', message);
+        }
+
+        // Dummy login function (prevents errors)
+        function login() {
+            console.log('Login functionality disabled');
+        }
+
+        // Dummy logout function (prevents errors)
+        function logout() {
+            console.log('Logout functionality disabled');
+        }
+
+        // Dummy saveCloudConfig function (prevents errors)
+        function saveCloudConfig(provider, config) {
+            console.log('Cloud config save disabled');
+        }
+
+        // Initialize the file upload functionality
+        function initFileUpload() {
+            // Speed tracking variables
+            let uploadStartTime = 0;
+            let uploadedBytes = 0;
+            let lastUploadedBytes = 0;
+            let lastUploadSpeedUpdateTime = 0;
+            const speedUpdateInterval = 500; // Update speed every 500ms
+            
+            // Handle file upload form submission
+            document.getElementById('uploadForm').addEventListener('submit', function(e) {
+                e.preventDefault();
+                
+                const fileInput = document.getElementById('fileInput');
+                const file = fileInput.files[0];
+                if (!file) {
+                    addLogMessage('Please select a file to upload', 'error');
+                    return;
+                }
+                
+                // Get storage provider and config
+                const storageType = document.getElementById('storageType').value;
+                const processFile = document.getElementById('processFile').checked;
+                
+                // Create form data
+                const formData = new FormData();
+                formData.append('file', file);
+                formData.append('storageType', storageType);
+                formData.append('processFile', processFile);
+                
+                // Add provider-specific config
+                if (storageType === 's3') {
+                    formData.append('region', document.getElementById('s3Region').value);
+                    formData.append('bucket', document.getElementById('s3Bucket').value);
+                    formData.append('accessKey', document.getElementById('s3AccessKey').value);
+                    formData.append('secretKey', document.getElementById('s3SecretKey').value);
+                    formData.append('prefix', document.getElementById('s3Prefix').value);
+                } else if (storageType === 'google') {
+                    formData.append('bucket', document.getElementById('gcsBucket').value);
+                    formData.append('credentialFile', document.getElementById('gcsCredFile').value);
+                    formData.append('prefix', document.getElementById('gcsPrefix').value);
+                }
+                
+                // Show processing status UI
+                document.getElementById('processingStatus').style.display = 'block';
+                document.getElementById('step1').className = 'step active';
+                document.getElementById('progressMessage').textContent = 'Uploading file...';
+                document.querySelector('.progress-bar').style.width = '0%';
+                document.querySelector('.progress-bar').textContent = '0%';
+                
+                // Reset speed tracking
+                uploadStartTime = Date.now();
+                uploadedBytes = 0;
+                lastUploadedBytes = 0;
+                lastUploadSpeedUpdateTime = uploadStartTime;
+                updateSpeedometer('upload', 0);
+                updateSpeedometer('download', 0);
+                
+                // Create an XMLHttpRequest to track upload progress
+                const xhr = new XMLHttpRequest();
+                xhr.open('POST', '/api/upload', true);
+                
+                // Track upload progress
+                xhr.upload.onprogress = function(event) {
+                    if (event.lengthComputable) {
+                        const now = Date.now();
+                        uploadedBytes = event.loaded;
+                        
+                        // Calculate upload percentage
+                        const percentComplete = Math.round((event.loaded / event.total) * 33); // 0-33% for upload phase
+                        document.querySelector('.progress-bar').style.width = `${percentComplete}%`;
+                        document.querySelector('.progress-bar').textContent = `${percentComplete}%`;
+                        
+                        // Update upload speed periodically
+                        if (now - lastUploadSpeedUpdateTime >= speedUpdateInterval) {
+                            // Calculate speed in bytes per second
+                            const timeDiff = (now - lastUploadSpeedUpdateTime) / 1000; // Convert ms to seconds
+                            const bytesDiff = uploadedBytes - lastUploadedBytes;
+                            const speed = bytesDiff / timeDiff; // Bytes per second
+                            
+                            // Update speedometer
+                            updateSpeedometer('upload', speed);
+                            
+                            // Update tracking variables
+                            lastUploadedBytes = uploadedBytes;
+                            lastUploadSpeedUpdateTime = now;
+                        }
+                    }
+                };
+                
+                // Handle upload completion
+                xhr.onload = function() {
+                    if (xhr.status === 200) {
+                        try {
+                            const data = JSON.parse(xhr.responseText);
+                            
+                            if (data.success) {
+                                // Calculate final average upload speed
+                                const totalTime = (Date.now() - uploadStartTime) / 1000; // seconds
+                                const avgSpeed = file.size / totalTime; // bytes per second
+                                updateSpeedometer('upload', avgSpeed);
+                                
+                                addLogMessage(`File uploaded successfully: ${file.name}`, 'success');
+                                document.getElementById('step1').className = 'step completed';
+                                document.getElementById('line1').className = 'step-line active';
+                                document.getElementById('step2').className = 'step active';
+                                document.getElementById('progressMessage').textContent = 'File uploaded. Processing...';
+                                document.querySelector('.progress-bar').style.width = '33%';
+                                document.querySelector('.progress-bar').textContent = '33%';
+                                
+                                // Subscribe to task updates via WebSocket
+                                if (data.taskId) {
+                                    subscribeToTask(data.taskId);
+                                }
+                                
+                                // Store the task ID in the UI
+                                const progressBar = document.querySelector('.progress-bar');
+                                progressBar.dataset.taskId = data.taskId;
+                            } else {
+                                addLogMessage(`Upload failed: ${data.error || 'Unknown error'}`, 'error');
+                                document.getElementById('progressMessage').textContent = `Upload failed: ${data.error || 'Unknown error'}`;
+                                updateSpeedometer('upload', 0);
+                            }
+                        } catch (error) {
+                            console.error('Error parsing response:', error);
+                            addLogMessage(`Upload error: Invalid server response`, 'error');
+                            document.getElementById('progressMessage').textContent = 'Upload error: Invalid server response';
+                            updateSpeedometer('upload', 0);
+                        }
+                    } else {
+                        addLogMessage(`Upload failed: Server returned status ${xhr.status}`, 'error');
+                        document.getElementById('progressMessage').textContent = `Upload failed: Server returned status ${xhr.status}`;
+                        updateSpeedometer('upload', 0);
+                    }
+                };
+                
+                // Handle upload errors
+                xhr.onerror = function() {
+                    console.error('Upload network error');
+                    addLogMessage('Upload error: Network error', 'error');
+                    document.getElementById('progressMessage').textContent = 'Upload error: Network error';
+                    updateSpeedometer('upload', 0);
+                };
+                
+                // Send the request
+                xhr.send(formData);
+            });
+            
+            // Initialize download progress tracking for links created after completed uploads
+            document.addEventListener('click', function(e) {
+                if (e.target && e.target.tagName === 'A' && e.target.getAttribute('href') && 
+                    e.target.getAttribute('href').startsWith('/download/')) {
+                    
+                    // Track downloads on links created after upload
+                    trackDownload(e.target);
+                }
+            }, true);
+        }
+        
+        // Update speedometer display
+        function updateSpeedometer(type, bytesPerSecond) {
+            // Convert bytes per second to appropriate unit
+            let speedValue;
+            let speedUnit;
+            
+            if (bytesPerSecond < 1024) {
+                speedValue = bytesPerSecond;
+                speedUnit = 'B/s';
+            } else if (bytesPerSecond < 1024 * 1024) {
+                speedValue = bytesPerSecond / 1024;
+                speedUnit = 'KB/s';
+            } else if (bytesPerSecond < 1024 * 1024 * 1024) {
+                speedValue = bytesPerSecond / (1024 * 1024);
+                speedUnit = 'MB/s';
+            } else {
+                speedValue = bytesPerSecond / (1024 * 1024 * 1024);
+                speedUnit = 'GB/s';
+            }
+            
+            // Round to 1 decimal place
+            speedValue = Math.round(speedValue * 10) / 10;
+            
+            // Get speedometer elements
+            const needle = document.getElementById(`${type}SpeedNeedle`);
+            const valueDisplay = document.getElementById(`${type}SpeedValue`);
+            
+            if (needle && valueDisplay) {
+                // Update the value display
+                valueDisplay.innerHTML = `${speedValue} <span class="speedometer-unit">${speedUnit}</span>`;
+                
+                // Calculate needle rotation (0 degrees = 0 KB/s, 180 degrees = 10 MB/s or more)
+                // Normalize the speed to a 0-10 scale where 10 represents 10 MB/s (10,485,760 bytes/s)
+                const maxSpeed = 10 * 1024 * 1024; // 10 MB/s
+                const normalizedSpeed = Math.min(bytesPerSecond / maxSpeed * 10, 10);
+                
+                // Convert to degrees (0-180)
+                const degrees = normalizedSpeed * 18;
+                
+                // Set needle rotation
+                needle.style.transform = `rotate(${degrees}deg)`;
+            }
+        }
+        
+        // Track download progress
+        function trackDownload(linkElement) {
+            // We can't directly track native browser downloads
+            // But we can simulate download speed with an XHR request and abort it after getting progress data
+            
+            const url = linkElement.getAttribute('href');
+            const fileName = url.split('/').pop();
+            
+            // Start download monitoring
+            addLogMessage(`Starting download of ${fileName}...`, 'info');
+            
+            let downloadStartTime = Date.now();
+            let downloadedBytes = 0;
+            let lastDownloadedBytes = 0;
+            let lastSpeedUpdateTime = downloadStartTime;
+            
+            // Create a request to track download progress
+            const xhr = new XMLHttpRequest();
+            xhr.open('GET', url, true);
+            xhr.responseType = 'blob';
+            
+            // Track download progress
+            xhr.onprogress = function(event) {
+                if (event.lengthComputable) {
+                    const now = Date.now();
+                    downloadedBytes = event.loaded;
+                    
+                    // Update download speed periodically
+                    if (now - lastSpeedUpdateTime >= 500) { // Update every 500ms
+                        // Calculate speed in bytes per second
+                        const timeDiff = (now - lastSpeedUpdateTime) / 1000;
+                        const bytesDiff = downloadedBytes - lastDownloadedBytes;
+                        const speed = bytesDiff / timeDiff;
+                        
+                        // Update speedometer
+                        updateSpeedometer('download', speed);
+                        
+                        // Update tracking variables
+                        lastDownloadedBytes = downloadedBytes;
+                        lastSpeedUpdateTime = now;
+                    }
+                    
+                    // If we've tracked enough of the download, abort the request
+                    // This is to prevent downloading the entire file twice
+                    if (event.loaded > 1024 * 1024 || (event.loaded / event.total) > 0.1) {
+                        xhr.abort();
+                        
+                        // Let user know we're just tracking, not interfering with the actual download
+                        addLogMessage('Download speed monitoring active...', 'info');
+                    }
+                }
+            };
+            
+            xhr.onload = function() {
+                // Calculate final average download speed
+                const totalTime = (Date.now() - downloadStartTime) / 1000;
+                const avgSpeed = downloadedBytes / totalTime;
+                updateSpeedometer('download', avgSpeed);
+            };
+            
+            xhr.onerror = function() {
+                console.error('Error tracking download');
+                updateSpeedometer('download', 0);
+            };
+            
+            xhr.send();
+        }
+        
+        // Update task progress in the UI
+        function updateTaskProgress(taskId, progress, status) {
+            // Update progress UI if this is the current task
+            const progressBar = document.querySelector('.progress-bar');
+            if (progressBar && progressBar.dataset.taskId === taskId) {
+                // Scale progress to 33-66% (upload was 0-33%, completion will be 66-100%)
+                const scaledProgress = 33 + (progress / 100 * 33);
+                progressBar.style.width = `${scaledProgress}%`;
+                progressBar.textContent = `${Math.round(scaledProgress)}%`;
+                
+                if (status) {
+                    document.getElementById('progressMessage').textContent = status;
+                }
+            }
+            
+            // Add log message
+            addLogMessage(`Processing progress: ${progress}% - ${status || ''}`, 'info');
+        }
+        
+        // Mark a task as completed with results
+        function markTaskComplete(taskId, downloadUrl, resultData) {
+            // Update UI if this is the current task
+            const progressBar = document.querySelector('.progress-bar');
+            if (progressBar && progressBar.dataset.taskId === taskId) {
+                document.getElementById('step2').className = 'step completed';
+                document.getElementById('line2').className = 'step-line active';
+                document.getElementById('step3').className = 'step active';
+                progressBar.style.width = '100%';
+                progressBar.textContent = '100%';
+                document.getElementById('progressMessage').textContent = 'Processing complete!';
+                
+                // Add a link to the result
+                if (downloadUrl) {
+                    const resultContainer = document.createElement('div');
+                    resultContainer.className = 'mt-3 text-center';
+                    
+                    const resultLink = document.createElement('a');
+                    resultLink.href = downloadUrl;
+                    resultLink.className = 'btn btn-success';
+                    resultLink.target = '_blank';
+                    resultLink.textContent = 'Download Processed File';
+                    
+                    resultContainer.appendChild(resultLink);
+                    
+                    // Add result container only if it doesn't exist yet
+                    const existingResult = document.querySelector('#processingStatus .mt-3.text-center');
+                    if (!existingResult) {
+                        document.getElementById('processingStatus').appendChild(resultContainer);
+                    }
+                }
+                
+                // File is saved, mark the step as complete
+                setTimeout(() => {
+                    document.getElementById('step3').className = 'step completed';
+                }, 1000);
+                
+                // Unsubscribe from the task updates
+                unsubscribeFromTask(taskId);
+            }
+        }
+        
+        // Mark a task as failed
+        function markTaskFailed(taskId, errorMessage) {
+            // Update UI if this is the current task
+            const progressBar = document.querySelector('.progress-bar');
+            if (progressBar && progressBar.dataset.taskId === taskId) {
+                document.getElementById('step2').className = 'step';
+                progressBar.className = 'progress-bar bg-danger';
+                document.getElementById('progressMessage').textContent = `Processing failed: ${errorMessage}`;
+            }
+            
+            // Add error to log
+            addLogMessage(`Processing failed: ${errorMessage}`, 'error');
+            
+            // Unsubscribe from the task updates
+            unsubscribeFromTask(taskId);
+        }
+        
+        // Add a message to the real-time log
+        function addLogMessage(message, type = 'info') {
+            const logElement = document.getElementById('realTimeLog');
+            if (!logElement) return;
+            
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString();
+            
+            const logEntry = document.createElement('div');
+            logEntry.className = `log-entry log-${type}`;
+            logEntry.innerHTML = `<span class="log-time">[${timeStr}]</span> ${message}`;
+            
+            logElement.appendChild(logEntry);
+            logElement.scrollTop = logElement.scrollHeight;
+        }
+        
+        // Discover peers on the LAN
+        function discoverPeers() {
+            document.getElementById('discoverPeers').disabled = true;
+            document.getElementById('peersList').innerHTML = 'Searching for peers...';
+            
+            fetch('/api/lan/discover')
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('discoverPeers').disabled = false;
+                    
+                    if (data.success && data.peers && data.peers.length > 0) {
+                        const peersList = document.getElementById('peersList');
+                        peersList.innerHTML = '';
+                        
+                        data.peers.forEach(peer => {
+                            const peerCard = document.createElement('div');
+                            peerCard.className = 'card mb-2';
+                            peerCard.innerHTML = `
+                                <div class="card-body">
+                                    <h6 class="card-title">${peer.name || 'Unknown Device'}</h6>
+                                    <p class="card-text">IP: ${peer.ip} - Port: ${peer.port}</p>
+                                    <button class="btn btn-sm btn-primary connect-peer" 
+                                            data-ip="${peer.ip}" 
+                                            data-port="${peer.port}" 
+                                            data-id="${peer.id}">
+                                        Connect
+                                    </button>
+                                </div>
+                            `;
+                            peersList.appendChild(peerCard);
+                            
+                            // Add click handler for the connect button
+                            peerCard.querySelector('.connect-peer').addEventListener('click', function() {
+                                connectToPeer(this.getAttribute('data-ip'), 
+                                            this.getAttribute('data-port'),
+                                            this.getAttribute('data-id'));
+                            });
+                        });
+                    } else {
+                        document.getElementById('peersList').innerHTML = 
+                            'No peers found on the local network. Make sure other devices are running the app.';
+                    }
+                })
+                .catch(error => {
+                    document.getElementById('discoverPeers').disabled = false;
+                    document.getElementById('peersList').innerHTML = 
+                        `Error discovering peers: ${error.message}`;
+                    console.error('Error discovering peers:', error);
+                });
+        }
+        
+        // Connect to a peer
+        function connectToPeer(ip, port, id) {
+            const transferStatus = document.getElementById('transferStatus');
+            transferStatus.style.display = 'block';
+            
+            const transferMessage = document.getElementById('transferMessage');
+            transferMessage.textContent = `Connecting to peer: ${ip}:${port}`;
+            
+            const progressBar = transferStatus.querySelector('.progress-bar');
+            progressBar.style.width = '0%';
+            progressBar.textContent = '0%';
+            
+            // Simulate connection and speed
+            setTimeout(() => {
+                transferMessage.textContent = 'Connected! Starting data transfer...';
+                
+                // Simulate download speed
+                const randomSpeed = (Math.random() * 8 + 2) * 1024 * 1024; // 2-10 MB/s
+                updateSpeedometer('download', randomSpeed);
+                
+                // Simulate progress updates
+                let progress = 0;
+                const progressInterval = setInterval(() => {
+                    progress += Math.random() * 5 + 1;
+                    if (progress > 100) progress = 100;
+                    
+                    progressBar.style.width = `${progress}%`;
+                    progressBar.textContent = `${Math.round(progress)}%`;
+                    
+                    if (progress >= 100) {
+                        clearInterval(progressInterval);
+                        transferMessage.textContent = 'Transfer complete!';
+                        setTimeout(() => {
+                            transferStatus.style.display = 'none';
+                            updateSpeedometer('download', 0);
+                        }, 3000);
+                    } else {
+                        transferMessage.textContent = `Transferring... ${Math.round(progress)}%`;
+                    }
+                }, 300);
+            }, 1000);
+        }
     </script>
 </body>
 </html>

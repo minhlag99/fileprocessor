@@ -18,21 +18,27 @@ OS_TYPE="linux"
 if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" || "$OSTYPE" == "win32" ]]; then
     OS_TYPE="windows"
     echo -e "${YELLOW}Windows environment detected.${NC}"
-    echo -e "For Windows deployment, please use the ${GREEN}deploy_windows.bat${NC} script instead."
-    echo -e "Running this script on Windows may cause errors due to Linux commands."
-    read -p "Do you want to continue anyway? (y/n): " continue_anyway
-    
-    if [[ ! $continue_anyway == [Yy]* ]]; then
-        echo -e "${BLUE}Exiting. Please use deploy_windows.bat for Windows deployments.${NC}"
+    echo -e "For Windows deployment, we'll run deploy_windows.bat which works better for Windows systems."
+
+    # Check if the Windows batch file exists
+    if [[ -f "./deploy_windows.bat" ]]; then
+        echo -e "${GREEN}Running deploy_windows.bat for Windows...${NC}"
+        cmd //c deploy_windows.bat
+        exit 0
+    else
+        echo -e "${RED}Windows batch file not found. Creating it...${NC}"
+        # Create a basic deploy_windows.bat file that can be expanded later
+        cat > deploy_windows.bat << 'EOF'
+@echo off
+echo Running Windows deployment...
+echo This file needs to be edited for full functionality.
+echo Please refer to the original repository for an updated version.
+pause
+EOF
+        echo -e "${GREEN}Created deploy_windows.bat. Please run it directly.${NC}"
+        cmd //c deploy_windows.bat
         exit 0
     fi
-    
-    echo -e "${RED}Warning: Continuing on Windows without sudo. Some commands may fail.${NC}"
-    
-    # Create a dummy sudo function that just executes the command directly
-    sudo() {
-        "$@"
-    }
 fi
 
 # Default configuration (can be overridden with environment variables)
@@ -51,6 +57,16 @@ LATEST_GO_VERSION="1.24.2"
 VPS_USER=""
 VPS_HOST=""
 SSH_KEY_PATH="~/.ssh/id_rsa"
+
+# Create a dummy sudo function for Windows
+if [[ "$OS_TYPE" == "windows" ]]; then
+    echo -e "${RED}Running on Windows without sudo.${NC}"
+    
+    # Create a dummy sudo function that just executes the command directly
+    sudo() {
+        "$@"
+    }
+fi
 
 # Banner
 echo -e "${BLUE}============================================${NC}"
@@ -407,7 +423,7 @@ ensure_ufw_installed() {
         echo -e "   ${GREEN}✓${NC} UFW installed"
     else
         echo -e "   ${GREEN}✓${NC} UFW already installed"
-    fi
+    }
 }
 
 # Function to install Go
@@ -1211,22 +1227,6 @@ EOF
         echo -e "   ${RED}×${NC} Service failed to start"
         echo -e "   Fetching error logs..."
         
-        ssh -i $SSH_KEY_PATH $VPS_USER@$VPS_HOST "sudo journalctl -u fileprocessor.service -n 20 --no-pager"
-        echo -e "\n   Testing configuration directly..."
-        
-        # Try to run application directly to get better error information
-        ssh -i $SSH_KEY_PATH $VPS_USER@$VPS_HOST "cd $APP_DIR && $APP_DIR/fileprocessor --config=$APP_DIR/fileprocessor.json --test-config"
-        
-        echo -e "\n   Checking application logs..."
-        ssh -i $SSH_KEY_PATH $VPS_USER@$VPS_HOST "cat $APP_DIR/logs/error.log 2>/dev/null || echo 'No error log found'"
-        
-        echo -e "\n${RED}Service failed to start. Please check the logs above for details.${NC}"
-        echo -e "You can manually check logs on the VPS with these commands:"
-        echo -e "  ssh -i $SSH_KEY_PATH $VPS_USER@$VPS_HOST"
-        echo -e "  sudo journalctl -u fileprocessor.service -n 50"
-        echo -e "  cat $APP_DIR/logs/error.log"
-    fi
-
     echo -e "${YELLOW}[8] Setting up Nginx (if available)...${NC}"
     ssh -i $SSH_KEY_PATH $VPS_USER@$VPS_HOST "if command -v nginx &> /dev/null; then 
         sudo bash -c 'cat > /etc/nginx/sites-available/fileprocessor.conf << EOF

@@ -2,7 +2,10 @@
 package middleware
 
 import (
+	"bufio"
+	"errors"
 	"log"
+	"net"
 	"net/http"
 	"runtime/debug"
 	"strings"
@@ -34,7 +37,25 @@ func Logger() Middleware {
 				return
 			}
 
-			// Create a custom response writer to capture status code
+			// Special handling for WebSocket connections
+			// WebSocket connections include the Upgrade header with value 'websocket'
+			if strings.ToLower(r.Header.Get("Upgrade")) == "websocket" {
+				// For WebSocket connections, don't wrap the response writer
+				next.ServeHTTP(w, r)
+
+				// Log WebSocket connection after the handler finishes
+				duration := time.Since(start)
+				log.Printf(
+					"%s %s %s WebSocket %s",
+					r.RemoteAddr,
+					r.Method,
+					r.URL.Path,
+					duration,
+				)
+				return
+			}
+
+			// Create a custom response writer to capture status code for regular HTTP requests
 			rw := &responseWriter{w, http.StatusOK}
 
 			// Process request
@@ -120,4 +141,27 @@ type responseWriter struct {
 func (rw *responseWriter) WriteHeader(code int) {
 	rw.statusCode = code
 	rw.ResponseWriter.WriteHeader(code)
+}
+
+// Hijack implements the http.Hijacker interface to allow WebSocket connections
+func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if hj, ok := rw.ResponseWriter.(http.Hijacker); ok {
+		return hj.Hijack()
+	}
+	return nil, nil, errors.New("http.Hijacker interface is not supported by the underlying ResponseWriter")
+}
+
+// Flush implements the http.Flusher interface
+func (rw *responseWriter) Flush() {
+	if f, ok := rw.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// Push implements the http.Pusher interface for HTTP/2 support
+func (rw *responseWriter) Push(target string, opts *http.PushOptions) error {
+	if p, ok := rw.ResponseWriter.(http.Pusher); ok {
+		return p.Push(target, opts)
+	}
+	return http.ErrNotSupported
 }
