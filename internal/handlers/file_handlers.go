@@ -162,13 +162,22 @@ func (h *FileHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// Debug log the basePath if using LocalStorage
+	if storageType == "local" {
+		if ls, ok := provider.(*storage.LocalStorage); ok {
+			basePath := ls.GetBasePath()
+			log.Printf("DEBUG: Using local storage with base path: %s", basePath)
+		}
+	}
 
 	// Store the file
 	id, err := provider.Store(r.Context(), header.Filename, file, header.Size, metadata)
 	if err != nil {
+		log.Printf("ERROR: Failed to store file: %v", err)
 		sendJSONError(w, fmt.Sprintf("Failed to store file: %v", err), http.StatusInternalServerError)
 		return
 	}
+	log.Printf("DEBUG: File stored successfully with ID: %s", id)
 
 	// Create file model
 	fileModel := &models.File{
@@ -180,6 +189,14 @@ func (h *FileHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		StorageType: storageType,
 		StorageID:   id,
 		Metadata:    metadata,
+	}
+
+	// Verify the file exists
+	_, metaData, err := provider.Retrieve(r.Context(), id)
+	if err != nil {
+		log.Printf("WARNING: Could not verify stored file: %v", err)
+	} else {
+		log.Printf("DEBUG: File verification successful, metadata: %v", metaData)
 	}
 
 	// Process file if requested
@@ -223,7 +240,31 @@ func (h *FileHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 				ticker := time.NewTicker(500 * time.Millisecond)
 				defer ticker.Stop()
 
-				for progress < 100 { // Changed to 100 to ensure completion
+				maxProgress := 90 // Only go to 90% to leave room for final completion step
+
+				// Monitor task status in parallel to provide accurate progress updates
+				go func() {
+					checkTicker := time.NewTicker(1 * time.Second)
+					defer checkTicker.Stop()
+
+					for {
+						select {
+						case <-checkTicker.C:
+							status := processors.GetTaskStatus(taskID)
+							if status == nil || status["status"] == "complete" || status["status"] == "error" {
+								// Task is complete or done with error, cancel progress reporting
+								cancelProgress()
+								return
+							}
+						case <-progressCtx.Done():
+							return
+						case <-r.Context().Done():
+							return
+						}
+					}
+				}()
+
+				for progress < maxProgress {
 					select {
 					case <-ticker.C:
 						progress += 5 // Smaller increments for smoother progress
@@ -234,37 +275,68 @@ func (h *FileHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 						})
 					case <-progressCtx.Done():
 						// Processing completed or failed, ensure we send 100% complete
-						if progress < 100 {
-							log.Printf("Sending final progress update for task %s: 100%%", taskID)
-							DefaultWebSocketHub.SendTaskUpdate(taskID, "processing_progress", map[string]interface{}{
-								"progress": 100,
-								"file":     fileModel,
-							})
-						}
+						log.Printf("Sending final progress update for task %s: 100%%", taskID)
+						DefaultWebSocketHub.SendTaskUpdate(taskID, "processing_progress", map[string]interface{}{
+							"progress": 100,
+							"file":     fileModel,
+						})
 						return
 					case <-r.Context().Done():
 						// Request was cancelled
 						return
 					}
 				}
+
+				// Wait for either completion signal or timeout
+				select {
+				case <-progressCtx.Done():
+					log.Printf("Sending final progress update for task %s: 100%%", taskID)
+					DefaultWebSocketHub.SendTaskUpdate(taskID, "processing_progress", map[string]interface{}{
+						"progress": 100,
+						"file":     fileModel,
+					})
+				case <-time.After(10 * time.Second): // Failsafe timeout
+					log.Printf("Timeout waiting for task %s to complete, sending 100%%", taskID)
+					DefaultWebSocketHub.SendTaskUpdate(taskID, "processing_progress", map[string]interface{}{
+						"progress": 100,
+						"file":     fileModel,
+					})
+				case <-r.Context().Done():
+					// Request was cancelled
+				}
 			}()
 
 			// Do the actual processing
 			result, err := processor.Process(r.Context(), reader, fileModel.Name, options) // Cancel progress reporting goroutine immediately before sending completion
-			cancelProgress()
-
-			// Send completion notification via WebSocket
+			cancelProgress()                                                               // Send completion notification via WebSocket
 			if err != nil {
 				log.Printf("Processing failed for file %s: %v", fileModel.Name, err)
 				DefaultWebSocketHub.SendTaskUpdate(taskID, "processing_failed", map[string]interface{}{
 					"error": err.Error(),
 					"file":  fileModel,
 				})
+
+				// Also send a separate completion event with error status
+				DefaultWebSocketHub.SendTaskUpdate(taskID, "processing_progress", map[string]interface{}{
+					"progress": 100,
+					"status":   "error",
+					"file":     fileModel,
+					"error":    err.Error(),
+				})
 			} else {
 				log.Printf("Processing completed for file %s", fileModel.Name)
+
+				// Send completion notification
 				DefaultWebSocketHub.SendTaskUpdate(taskID, "processing_completed", map[string]interface{}{
 					"file":    fileModel,
 					"summary": result.Summary,
+				})
+
+				// Also send final progress update to ensure UI updates
+				DefaultWebSocketHub.SendTaskUpdate(taskID, "processing_progress", map[string]interface{}{
+					"progress": 100,
+					"status":   "complete",
+					"file":     fileModel,
 				})
 			}
 
@@ -424,7 +496,6 @@ func (h *FileHandler) ListFiles(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-
 	// List files
 	files, err := provider.List(r.Context(), prefix)
 	if err != nil {
@@ -432,9 +503,12 @@ func (h *FileHandler) ListFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	log.Printf("DEBUG: Listed %d files from storage provider %s with prefix %s", len(files), storageType, prefix)
+
 	// Convert to file models
 	var fileModels []*models.File
 	for _, file := range files {
+		log.Printf("DEBUG: Processing file listing: %s, ContentType: %s", file.Name, file.ContentType)
 		fileModel := &models.File{
 			ID:          file.ID,
 			Name:        file.Name,

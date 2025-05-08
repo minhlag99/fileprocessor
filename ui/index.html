@@ -1448,11 +1448,13 @@
             // Add log message
             addLogMessage(`Processing progress: ${progress}% - ${status || ''}`, 'info');
         }
-          // Mark a task as completed with results
-        function markTaskComplete(taskId, downloadUrl, resultData) {
+          // Mark a task as completed with results        function markTaskComplete(taskId, downloadUrl, resultData) {
             // Log the completion
             console.log("Task completed:", taskId, resultData);
             addLogMessage(`Task ${taskId} completed!`, 'success');
+            
+            // Refresh the file list to show newly processed file
+            refreshFileList();
             
             // Update UI if this is the current task
             const progressBar = document.querySelector('.progress-bar');
@@ -1487,6 +1489,9 @@
                 // File is saved, mark the step as complete
                 setTimeout(() => {
                     document.getElementById('step3').className = 'step completed';
+                    
+                    // Ensure file list is refreshed again after a short delay
+                    setTimeout(refreshFileList, 2000);
                 }, 1000);
                 
                 // Unsubscribe from the task updates

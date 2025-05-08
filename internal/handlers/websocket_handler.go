@@ -399,6 +399,7 @@ func (h *WebSocketHub) Unsubscribe(clientID, taskID string) {
 // SendTaskUpdate sends an update about a specific task
 func (h *WebSocketHub) SendTaskUpdate(taskID string, updateType string, content interface{}) {
 	if taskID == "" || updateType == "" {
+		log.Printf("WARNING: Attempted to send task update with empty taskID or updateType")
 		log.Printf("Warning: Attempted to send task update with empty taskID or updateType")
 		return
 	}

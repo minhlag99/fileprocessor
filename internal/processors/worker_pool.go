@@ -2,6 +2,7 @@
 package processors
 
 import (
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -151,12 +152,30 @@ func (p *WorkerPool) worker(id int) {
 	for {
 		select {
 		case task := <-p.tasks:
-			log.Printf("Worker %d processing task %s", id, task.ID) // Process the task
-			result, err := task.Process()
+			log.Printf("Worker %d processing task %s", id, task.ID)
+
+			// Process the task with panic recovery
+			var result *ProcessResult
+			var err error
+
+			func() {
+				// Recover from panics in task processing
+				defer func() {
+					if r := recover(); r != nil {
+						errMsg := fmt.Sprintf("Task panic: %v", r)
+						log.Printf("CRITICAL: Worker %d recovered from panic in task %s: %v", id, task.ID, r)
+						err = fmt.Errorf("%s", errMsg)
+					}
+				}()
+
+				// Actually process the task
+				result, err = task.Process()
+			}()
 
 			// Send completion notification before cleanup
 			if err != nil {
-				log.Printf("Worker %d failed task %s: %v", id, task.ID, err) // Mark task status as error
+				log.Printf("Worker %d failed task %s: %v", id, task.ID, err)
+				// Mark task status as error
 				task.Status = "error"
 
 				// Make sure error is propagated to any task status listeners
@@ -179,7 +198,8 @@ func (p *WorkerPool) worker(id int) {
 					log.Printf("Warning: Error channel for task %s is full or closed", task.ID)
 				}
 			} else {
-				log.Printf("Worker %d completed task %s", id, task.ID) // Mark task status as complete
+				log.Printf("Worker %d completed task %s successfully", id, task.ID)
+				// Mark task status as complete
 				task.Status = "complete"
 
 				// Make sure completion is propagated to any task status listeners
@@ -203,13 +223,30 @@ func (p *WorkerPool) worker(id int) {
 				}
 			}
 
-			// Update status in map
-			p.mu.Lock()
-			delete(p.active, task.ID)
-			p.mu.Unlock()
+			// Ensure proper cleanup after sending results/errors
+			// Make sure we close channels only once, after a delay
+			go func(taskID string, taskStatus string) {
+				// Allow a delay to ensure all consumers have had time to read the result
+				// Use longer delay for completed tasks to ensure websocket messages are delivered
+				if taskStatus == "complete" {
+					time.Sleep(2 * time.Second)
+				} else {
+					time.Sleep(1 * time.Second)
+				}
 
-			// Close update channel to signal no more updates
-			close(task.UpdateChan)
+				// Update status in map (safely remove task)
+				p.mu.Lock()
+				if t, exists := p.active[taskID]; exists {
+					// Log final cleanup
+					log.Printf("Final cleanup for task %s with status: %s", taskID, taskStatus)
+
+					// Close update channel to signal no more updates
+					close(t.UpdateChan)
+					delete(p.active, taskID)
+					log.Printf("Task %s cleanup completed", taskID)
+				}
+				p.mu.Unlock()
+			}(task.ID, task.Status)
 		case <-p.quit:
 			log.Printf("Worker %d stopping", id)
 			return
@@ -254,8 +291,15 @@ func GetTaskStatus(taskID string) map[string]interface{} {
 	DefaultPool.mu.RUnlock()
 
 	if !exists {
-		// Task not found or already completed
-		return nil
+		// Task not found (it might have completed successfully)
+		// Here, return a completed status to handle the case where the task
+		// already finished and was removed from active tasks
+		return map[string]interface{}{
+			"status":   "complete",
+			"id":       taskID,
+			"progress": 100,
+			"message":  "Task completed",
+		}
 	}
 
 	// Basic status information
@@ -267,7 +311,15 @@ func GetTaskStatus(taskID string) map[string]interface{} {
 
 	// For tasks in progress, try to estimate completion percentage
 	// Default to 50% if we can't determine
-	status["progress"] = 50
+	if task.Status == "complete" {
+		status["progress"] = 100
+	} else if task.Status == "error" {
+		status["progress"] = 100
+		status["error"] = "Task failed"
+	} else {
+		status["progress"] = 50
+	}
 
+	log.Printf("GetTaskStatus for %s: %v", taskID, status)
 	return status
 }
