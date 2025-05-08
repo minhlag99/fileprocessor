@@ -208,44 +208,60 @@ func (h *FileHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 				GeneratePreview: true,
 				ExtractMetadata: true,
 				MaxPreviewSize:  1024 * 10, // 10KB
-			}
-
-			// Send processing started notification via WebSocket
+			}			// Send processing started notification via WebSocket
 			DefaultWebSocketHub.Broadcast("processing_started", map[string]interface{}{
 				"taskId": taskID,
 				"file":   fileModel,
 			})
-
-			// Report progress updates
+			
+			// Create a context with cancellation for the progress reporter
+			progressCtx, cancelProgress := context.WithCancel(context.Background())
+			defer cancelProgress()
+					// Report progress updates with ability to stop when processing completes
 			go func() {
 				progress := 0
 				ticker := time.NewTicker(500 * time.Millisecond)
 				defer ticker.Stop()
 
-				for progress < 90 {
+				for progress < 100 { // Changed to 100 to ensure completion
 					select {
 					case <-ticker.C:
-						progress += 10
+						progress += 5 // Smaller increments for smoother progress
+						log.Printf("Sending progress update for task %s: %d%%", taskID, progress)
 						DefaultWebSocketHub.SendTaskUpdate(taskID, "processing_progress", map[string]interface{}{
 							"progress": progress,
 							"file":     fileModel,
 						})
+					case <-progressCtx.Done():
+						// Processing completed or failed, ensure we send 100% complete
+						if progress < 100 {
+							log.Printf("Sending final progress update for task %s: 100%%", taskID)
+							DefaultWebSocketHub.SendTaskUpdate(taskID, "processing_progress", map[string]interface{}{
+								"progress": 100,
+								"file":     fileModel,
+							})
+						}
+						return
 					case <-r.Context().Done():
+						// Request was cancelled
 						return
 					}
 				}
 			}()
 
 			// Do the actual processing
-			result, err := processor.Process(r.Context(), reader, fileModel.Name, options)
+			result, err := processor.Process(r.Context(), reader, fileModel.Name, options)			// Cancel progress reporting goroutine immediately before sending completion
+			cancelProgress()
 
 			// Send completion notification via WebSocket
 			if err != nil {
+				log.Printf("Processing failed for file %s: %v", fileModel.Name, err)
 				DefaultWebSocketHub.SendTaskUpdate(taskID, "processing_failed", map[string]interface{}{
 					"error": err.Error(),
 					"file":  fileModel,
 				})
 			} else {
+				log.Printf("Processing completed for file %s", fileModel.Name)
 				DefaultWebSocketHub.SendTaskUpdate(taskID, "processing_completed", map[string]interface{}{
 					"file":    fileModel,
 					"summary": result.Summary,

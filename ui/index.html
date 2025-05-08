@@ -927,7 +927,27 @@
         // Subscribe to a task's updates
         function subscribeToTask(taskId) {
             if (!taskId) return false;
-            return sendWebSocketMessage('subscribe', taskId);
+            console.log("Sending subscribe message for task:", taskId);
+            const result = sendWebSocketMessage('subscribe', taskId);
+            
+            // Add debug logging for subscribed tasks
+            addLogMessage(`Subscribed to updates for task ID: ${taskId}`, 'info');
+            
+            // If websocket isn't connected, try reconnecting
+            if (!result) {
+                console.error("WebSocket not connected, can't subscribe to task:", taskId);
+                
+                // Try to reconnect WebSocket
+                if (!ws || ws.readyState !== WebSocket.CONNECTING) {
+                    console.log("Attempting to reconnect WebSocket...");
+                    connectWebSocket();
+                    
+                    // Retry subscription after a short delay
+                    setTimeout(() => subscribeToTask(taskId), 1000);
+                }
+            }
+            
+            return result;
         }
         
         // Unsubscribe from a task's updates
@@ -972,6 +992,20 @@
                         
                         // Update progress bar (scale from 33% to 90%)
                         updateTaskProgress(message.taskId, progress, `Processing: ${progress}%`);
+                        
+                        // If we've reached 100%, mark as complete in case we don't get an explicit completion message
+                        if (progress >= 100) {
+                            setTimeout(() => {
+                                const progressBar = document.querySelector('.progress-bar');
+                                if (progressBar && progressBar.dataset.taskId === message.taskId && 
+                                    !document.getElementById('step3').classList.contains('active')) {
+                                    console.log("Processing reached 100%, marking as complete");
+                                    document.getElementById('step2').className = 'step completed';
+                                    document.getElementById('line2').className = 'step-line active';
+                                    document.getElementById('step3').className = 'step active';
+                                }
+                            }, 1000);
+                        }
                     }
                     break;
                     
@@ -1232,15 +1266,17 @@
                                 document.getElementById('progressMessage').textContent = 'File uploaded. Processing...';
                                 document.querySelector('.progress-bar').style.width = '33%';
                                 document.querySelector('.progress-bar').textContent = '33%';
-                                
-                                // Subscribe to task updates via WebSocket
+                                  // Subscribe to task updates via WebSocket
                                 if (data.taskId) {
+                                    console.log("Subscribing to task updates for:", data.taskId);
                                     subscribeToTask(data.taskId);
+                                    
+                                    // Store the task ID in the UI
+                                    const progressBar = document.querySelector('.progress-bar');
+                                    progressBar.dataset.taskId = data.taskId;
+                                } else {
+                                    console.error("No task ID received from server!");
                                 }
-                                
-                                // Store the task ID in the UI
-                                const progressBar = document.querySelector('.progress-bar');
-                                progressBar.dataset.taskId = data.taskId;
                             } else {
                                 addLogMessage(`Upload failed: ${data.error || 'Unknown error'}`, 'error');
                                 document.getElementById('progressMessage').textContent = `Upload failed: ${data.error || 'Unknown error'}`;
@@ -1412,9 +1448,12 @@
             // Add log message
             addLogMessage(`Processing progress: ${progress}% - ${status || ''}`, 'info');
         }
-        
-        // Mark a task as completed with results
+          // Mark a task as completed with results
         function markTaskComplete(taskId, downloadUrl, resultData) {
+            // Log the completion
+            console.log("Task completed:", taskId, resultData);
+            addLogMessage(`Task ${taskId} completed!`, 'success');
+            
             // Update UI if this is the current task
             const progressBar = document.querySelector('.progress-bar');
             if (progressBar && progressBar.dataset.taskId === taskId) {
@@ -1451,7 +1490,10 @@
                 }, 1000);
                 
                 // Unsubscribe from the task updates
+                console.log("Unsubscribing from task:", taskId);
                 unsubscribeFromTask(taskId);
+            } else {
+                console.warn("Progress bar not found or task ID mismatch:", taskId);
             }
         }
         

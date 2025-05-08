@@ -403,13 +403,28 @@ func (h *WebSocketHub) SendTaskUpdate(taskID string, updateType string, content 
 		return
 	}
 
-	h.broadcast <- ServerMessage{
+	// Log detailed information about the task update
+	contentJSON, _ := json.Marshal(content)
+	log.Printf("Sending task update: TaskID=%s, Type=%s, Content=%s", taskID, updateType, string(contentJSON))
+
+	message := ServerMessage{
 		Type:      updateType,
 		TaskID:    taskID,
 		Content:   content,
 		Timestamp: time.Now().UnixNano() / int64(time.Millisecond),
 		RequestID: generateShortID(),
 	}
+
+	// Check for subscribers to this task
+	h.mu.RLock()
+	subscribers, exists := h.tasks[taskID]
+	h.mu.RUnlock()
+
+	if !exists || len(subscribers) == 0 {
+		log.Printf("Warning: No subscribers for task %s, broadcasting to all clients", taskID)
+	}
+
+	h.broadcast <- message
 }
 
 // BroadcastSystemMessage sends a system message to all connected clients
@@ -568,6 +583,9 @@ func ServeWs(hub *WebSocketHub, w http.ResponseWriter, r *http.Request) {
 	// Register the client
 	hub.register <- client
 
+	// Log client connection
+	log.Printf("New WebSocket client connected: %s", clientID)
+
 	// Start goroutines for reading and writing
 	go client.readPump()
 	go client.writePump()
@@ -666,13 +684,26 @@ func (c *Client) readPump() {
 		}
 
 		// Handle message based on type
-		switch clientMsg.Type {
-		case "subscribe":
+		switch clientMsg.Type {		case "subscribe":
 			if clientMsg.TaskID != "" {
+				log.Printf("Client %s subscribing to task %s", c.clientID, clientMsg.TaskID)
 				c.hub.Subscribe(c.clientID, clientMsg.TaskID)
 				c.send <- ServerMessage{
 					Type:      "subscribed",
 					TaskID:    clientMsg.TaskID,
+					Timestamp: time.Now().UnixNano() / int64(time.Millisecond),
+					RequestID: generateShortID(),
+				}
+				
+				// Send current task status to the client immediately
+				// This helps clients that subscribe after processing has already started
+				log.Printf("Checking for existing task status for task %s", clientMsg.TaskID)
+				
+				// Send a confirmation processing_progress at 50% to ensure client shows processing
+				c.send <- ServerMessage{
+					Type:    "processing_progress",
+					TaskID:  clientMsg.TaskID,
+					Content: map[string]interface{}{"progress": 50},
 					Timestamp: time.Now().UnixNano() / int64(time.Millisecond),
 					RequestID: generateShortID(),
 				}

@@ -1,0 +1,5 @@
+# Git directory
+/.git/
+
+# Uploads and temporary files
+/uploads/temp/

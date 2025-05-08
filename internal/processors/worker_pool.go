@@ -151,15 +151,14 @@ func (p *WorkerPool) worker(id int) {
 	for {
 		select {
 		case task := <-p.tasks:
-			log.Printf("Worker %d processing task %s", id, task.ID)
-
-			// Process the task
+			log.Printf("Worker %d processing task %s", id, task.ID)			// Process the task
 			result, err := task.Process()
 
 			// Send completion notification before cleanup
 			if err != nil {
-				log.Printf("Worker %d failed task %s: %v", id, task.ID, err)
-
+				log.Printf("Worker %d failed task %s: %v", id, task.ID, err)				// Mark task status as error
+				task.Status = "error"
+				
 				// Make sure error is propagated to any task status listeners
 				select {
 				case task.UpdateChan <- map[string]interface{}{
@@ -167,14 +166,22 @@ func (p *WorkerPool) worker(id int) {
 					"error":    err.Error(),
 					"progress": 100,
 				}:
+					log.Printf("Task %s error update sent successfully", task.ID)
 				default:
 					log.Printf("Warning: Couldn't send error update for task %s", task.ID)
 				}
 
-				task.Error <- err
+				// Ensure error is sent to the error channel
+				select {
+				case task.Error <- err:
+					log.Printf("Task %s error sent to error channel", task.ID)
+				default:
+					log.Printf("Warning: Error channel for task %s is full or closed", task.ID)
+				}
 			} else {
-				log.Printf("Worker %d completed task %s", id, task.ID)
-
+				log.Printf("Worker %d completed task %s", id, task.ID)				// Mark task status as complete
+				task.Status = "complete"
+				
 				// Make sure completion is propagated to any task status listeners
 				select {
 				case task.UpdateChan <- map[string]interface{}{
@@ -182,11 +189,18 @@ func (p *WorkerPool) worker(id int) {
 					"progress": 100,
 					"result":   result,
 				}:
+					log.Printf("Task %s completion update sent successfully", task.ID)
 				default:
 					log.Printf("Warning: Couldn't send completion update for task %s", task.ID)
 				}
 
-				task.Result <- result
+				// Ensure result is sent to the result channel
+				select {
+				case task.Result <- result:
+					log.Printf("Task %s result sent to result channel", task.ID)
+				default:
+					log.Printf("Warning: Result channel for task %s is full or closed", task.ID)
+				}
 			}
 
 			// Update status in map
@@ -227,4 +241,33 @@ func GetWorkerPoolStats() (int, int) {
 	queueSize := len(DefaultPool.tasks)
 
 	return activeWorkers, queueSize
+}
+
+// GetTaskStatus returns the status of a task by ID if it exists
+func GetTaskStatus(taskID string) map[string]interface{} {
+	if DefaultPool == nil || taskID == "" {
+		return nil
+	}
+
+	DefaultPool.mu.RLock()
+	task, exists := DefaultPool.active[taskID]
+	DefaultPool.mu.RUnlock()
+
+	if !exists {
+		// Task not found or already completed
+		return nil
+	}
+
+	// Basic status information
+	status := map[string]interface{}{
+		"status": task.Status,
+		"id":     task.ID,
+		"time":   time.Since(task.Timestamp).Seconds(),
+	}
+
+	// For tasks in progress, try to estimate completion percentage
+	// Default to 50% if we can't determine
+	status["progress"] = 50
+
+	return status
 }
