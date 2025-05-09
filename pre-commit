@@ -1,0 +1,20 @@
+#!/bin/sh
+
+# Run tests
+echo "Running tests..."
+go test ./... -v
+TEST_RESULT=$?
+
+# Run linting
+echo "Running linting..."
+golangci-lint run
+LINT_RESULT=$?
+
+# Check results
+if [ $TEST_RESULT -ne 0 ] || [ $LINT_RESULT -ne 0 ]; then
+  echo "Pre-commit checks failed. Please fix the issues before committing."
+  exit 1
+fi
+
+echo "Pre-commit checks passed."
+exit 0
