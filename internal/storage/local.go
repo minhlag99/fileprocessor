@@ -1,4 +1,3 @@
-// Package storage provides interfaces and implementations for different storage providers
 package storage
 
 import (
@@ -195,5 +194,5 @@ func (l *LocalStorage) GetSignedURL(ctx context.Context, id string, expiryMinute
 		return "", fmt.Errorf("failed to get absolute path: %w", err)
 	}
 	// Convert to file:// URL format
-	return "file://" + strings.Replace(absPath, "\\", "/", -1), nil
+	return "file://" + strings.replace(absPath, "\\", "/", -1), nil
 }

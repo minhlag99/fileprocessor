@@ -13,6 +13,7 @@ import (
 	"io/ioutil"
 	"path/filepath"
 	"strings"
+	"testing"
 )
 
 // ImageProcessor processes image files
@@ -93,4 +94,38 @@ func (p *ImageProcessor) CanProcess(contentType, ext string) bool {
 // init registers the processor with the registry
 func init() {
 	Register(NewImageProcessor(), "image/jpeg", "image/png", "image/gif", "image/bmp", "image/webp")
+}
+
+// TestImageProcessor tests the image processing capabilities
+func TestImageProcessor(t *testing.T) {
+	processor := NewImageProcessor()
+
+	// Test with a sample image file
+	file, err := os.Open("testdata/sample.jpg")
+	if err != nil {
+		t.Fatalf("Failed to open test file: %v", err)
+	}
+	defer file.Close()
+
+	options := ProcessOptions{
+		GeneratePreview: true,
+		ExtractMetadata: true,
+		MaxPreviewSize:  1024 * 10, // 10KB
+	}
+
+	result, err := processor.Process(context.Background(), file, "sample.jpg", options)
+	if err != nil {
+		t.Fatalf("Failed to process image file: %v", err)
+	}
+
+	// Check the result
+	if result.Summary == "" {
+		t.Error("Expected summary, got empty string")
+	}
+	if len(result.Metadata) == 0 {
+		t.Error("Expected metadata, got empty map")
+	}
+	if len(result.Preview) == 0 {
+		t.Error("Expected preview, got empty byte slice")
+	}
 }

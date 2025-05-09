@@ -390,3 +390,22 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - [Google Cloud SDK for Go](https://github.com/googleapis/google-cloud-go) for GCS integration
 - [UniDoc](https://github.com/unidoc/unioffice) for Word document processing
 - [Bootstrap](https://getbootstrap.com/) for the web interface
+
+## Tests
+
+The application includes comprehensive tests to ensure all features work as expected. The tests cover:
+
+- Server initialization and route setup
+- Authentication and authorization features
+- Configuration options
+- File operations (upload, download, list, delete, media preview)
+- File processing capabilities (audio, image, text, video, Word document)
+- Local storage capabilities
+
+To run the tests, use the following command:
+
+```bash
+go test ./...
+```
+
+This will run all tests in the project and provide a summary of the results.

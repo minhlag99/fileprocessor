@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/ioutil"
 	"strings"
+	"testing"
 	"time"
 
 	"github.com/unidoc/unioffice/document"
@@ -143,4 +144,38 @@ func init() {
 		"application/docx",
 		"application/msword",
 	)
+}
+
+// TestWordProcessor tests the Word document processing capabilities
+func TestWordProcessor(t *testing.T) {
+	processor := NewWordProcessor()
+
+	// Test with a sample Word document
+	file, err := os.Open("testdata/sample.docx")
+	if err != nil {
+		t.Fatalf("Failed to open test file: %v", err)
+	}
+	defer file.Close()
+
+	options := ProcessOptions{
+		GeneratePreview: true,
+		ExtractMetadata: true,
+		MaxPreviewSize:  1024, // 1KB
+	}
+
+	result, err := processor.Process(context.Background(), file, "sample.docx", options)
+	if err != nil {
+		t.Fatalf("Failed to process Word document: %v", err)
+	}
+
+	// Check the result
+	if result.Summary == "" {
+		t.Error("Expected summary, got empty string")
+	}
+	if len(result.Metadata) == 0 {
+		t.Error("Expected metadata, got empty map")
+	}
+	if len(result.Preview) == 0 {
+		t.Error("Expected preview, got empty byte slice")
+	}
 }

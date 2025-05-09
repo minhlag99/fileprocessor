@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"testing"
 )
 
 // VideoProcessor processes video files
@@ -142,4 +143,38 @@ func (p *VideoProcessor) CanProcess(contentType, ext string) bool {
 // init registers the processor with the registry
 func init() {
 	Register(NewVideoProcessor(), "video/mp4", "video/quicktime", "video/x-msvideo", "video/webm", "video/x-matroska")
+}
+
+// TestVideoProcessor tests the video processing capabilities
+func TestVideoProcessor(t *testing.T) {
+	processor := NewVideoProcessor()
+
+	// Test with a sample video file
+	file, err := os.Open("testdata/sample.mp4")
+	if err != nil {
+		t.Fatalf("Failed to open test file: %v", err)
+	}
+	defer file.Close()
+
+	options := ProcessOptions{
+		GeneratePreview: true,
+		ExtractMetadata: true,
+		MaxPreviewSize:  1024 * 10, // 10KB
+	}
+
+	result, err := processor.Process(context.Background(), file, "sample.mp4", options)
+	if err != nil {
+		t.Fatalf("Failed to process video file: %v", err)
+	}
+
+	// Check the result
+	if result.Summary == "" {
+		t.Error("Expected summary, got empty string")
+	}
+	if len(result.Metadata) == 0 {
+		t.Error("Expected metadata, got empty map")
+	}
+	if len(result.Preview) == 0 {
+		t.Error("Expected preview, got empty byte slice")
+	}
 }

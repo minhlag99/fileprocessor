@@ -1,4 +1,3 @@
-// Package handlers provides HTTP handlers for file operations
 package handlers
 
 import (

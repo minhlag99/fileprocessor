@@ -1,4 +1,3 @@
-// Package main is the entry point for the file processor server
 package main
 
 import (
