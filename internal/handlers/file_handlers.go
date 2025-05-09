@@ -198,7 +198,6 @@ func (h *FileHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 	} else {
 		log.Printf("DEBUG: File verification successful, metadata: %v", metaData)
 	}
-
 	// Process file if requested
 	var processedFile *models.ProcessedFile
 	if processFile {
@@ -208,7 +207,7 @@ func (h *FileHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		// Create a task function
 		processFn := func() (*processors.ProcessResult, error) {
 			// Get file content
-			reader, _, err := provider.Retrieve(r.Context(), fileModel.StorageID)
+			reader, _, err := provider.Retrieve(context.Background(), fileModel.StorageID)
 			if err != nil {
 				return nil, fmt.Errorf("failed to retrieve file: %w", err)
 			}
@@ -225,7 +224,9 @@ func (h *FileHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 				GeneratePreview: true,
 				ExtractMetadata: true,
 				MaxPreviewSize:  1024 * 10, // 10KB
-			} // Send processing started notification via WebSocket
+			}
+
+			// Send processing started notification via WebSocket
 			DefaultWebSocketHub.Broadcast("processing_started", map[string]interface{}{
 				"taskId": taskID,
 				"file":   fileModel,
@@ -241,17 +242,29 @@ func (h *FileHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 				defer ticker.Stop()
 
 				maxProgress := 90 // Only go to 90% to leave room for final completion step
-
 				// Monitor task status in parallel to provide accurate progress updates
 				go func() {
-					checkTicker := time.NewTicker(1 * time.Second)
+					checkTicker := time.NewTicker(500 * time.Millisecond) // Check more frequently
 					defer checkTicker.Stop()
 
 					for {
 						select {
 						case <-checkTicker.C:
 							status := processors.GetTaskStatus(taskID)
-							if status == nil || status["status"] == "complete" || status["status"] == "error" {
+							if status == nil {
+								// If status is nil, wait a bit and try again
+								continue
+							}
+
+							// If we have a percent complete in the status, use it directly
+							if percent, ok := status["percentComplete"].(float64); ok && percent > 0 {
+								progress = int(percent)
+								if progress > maxProgress {
+									progress = maxProgress
+								}
+							}
+
+							if status["status"] == "complete" || status["status"] == "error" {
 								// Task is complete or done with error, cancel progress reporting
 								cancelProgress()
 								return
@@ -264,14 +277,28 @@ func (h *FileHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 					}
 				}()
 
+				// Send initial progress update
+				DefaultWebSocketHub.SendTaskUpdate(taskID, "processing_progress", map[string]interface{}{
+					"progress": 0,
+					"file":     fileModel,
+				})
+
 				for progress < maxProgress {
 					select {
 					case <-ticker.C:
-						progress += 5 // Smaller increments for smoother progress
+						// Increase by smaller increments for smoother progress
+						progress += 3
+
+						// Ensure progress doesn't exceed maxProgress
+						if progress > maxProgress {
+							progress = maxProgress
+						}
+
 						log.Printf("Sending progress update for task %s: %d%%", taskID, progress)
 						DefaultWebSocketHub.SendTaskUpdate(taskID, "processing_progress", map[string]interface{}{
 							"progress": progress,
 							"file":     fileModel,
+							"status":   "processing",
 						})
 					case <-progressCtx.Done():
 						// Processing completed or failed, ensure we send 100% complete
@@ -279,23 +306,29 @@ func (h *FileHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 						DefaultWebSocketHub.SendTaskUpdate(taskID, "processing_progress", map[string]interface{}{
 							"progress": 100,
 							"file":     fileModel,
+							"status":   "complete",
 						})
 						return
 					case <-r.Context().Done():
 						// Request was cancelled
 						return
 					}
-				}
-
-				// Wait for either completion signal or timeout
+				} // Wait for either completion signal or timeout
 				select {
 				case <-progressCtx.Done():
 					log.Printf("Sending final progress update for task %s: 100%%", taskID)
 					DefaultWebSocketHub.SendTaskUpdate(taskID, "processing_progress", map[string]interface{}{
 						"progress": 100,
 						"file":     fileModel,
+						"status":   "complete",
 					})
-				case <-time.After(10 * time.Second): // Failsafe timeout
+
+					// Also send a explicit completion message
+					time.Sleep(500 * time.Millisecond) // Short delay to ensure progress update is processed first
+					DefaultWebSocketHub.SendTaskUpdate(taskID, "processing_completed", map[string]interface{}{
+						"file": fileModel,
+					})
+				case <-time.After(30 * time.Second): // Increase timeout for larger files
 					log.Printf("Timeout waiting for task %s to complete, sending 100%%", taskID)
 					DefaultWebSocketHub.SendTaskUpdate(taskID, "processing_progress", map[string]interface{}{
 						"progress": 100,
@@ -367,6 +400,17 @@ func (h *FileHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 					"status": "processing",
 				},
 			}
+
+			// Store initial task status in cache for better resilience
+			initialStatus := map[string]interface{}{
+				"status":          "processing",
+				"id":              taskID,
+				"percentComplete": 10.0,
+				"message":         "Processing started",
+				"timestamp":       time.Now().UnixNano() / int64(time.Millisecond),
+			}
+			processors.StoreCompletedTaskStatus(taskID, initialStatus)
+
 			sendJSONResponse(w, response, http.StatusOK)
 			return
 		}

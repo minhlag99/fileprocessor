@@ -458,16 +458,11 @@ func main() {
 		log.Println("Worker pool stopped gracefully")
 	case <-time.After(10 * time.Second):
 		log.Println("Worker pool forced to stop after timeout")
-	}
-
-	// Stop LAN transfer service if it was enabled
+	} // Stop LAN transfer service if it was enabled
 	if lanHandler != nil {
 		log.Println("Stopping LAN transfer service...")
-		if err := lanHandler.Stop(); err != nil {
-			log.Printf("Error stopping LAN transfer service: %v", err)
-		} else {
-			log.Println("LAN transfer service stopped")
-		}
+		lanHandler.Stop()
+		log.Println("LAN transfer service stopped")
 	}
 
 	// Clean up any temporary files
@@ -591,13 +586,12 @@ func setupRoutes(mux *http.ServeMux, fileHandler *handlers.FileHandler,
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(info)
 	})
-
 	// LAN transfer routes if enabled
 	if lanHandler != nil {
-		mux.HandleFunc("/api/lan/discover", lanHandler.HandleDiscoverPeers)
-		mux.HandleFunc("/api/lan/initiate", lanHandler.HandleInitiateTransfer)
-		mux.HandleFunc("/api/lan/accept", lanHandler.HandleAcceptTransfer)
-		mux.HandleFunc("/api/lan/status", lanHandler.HandleTransferStatus)
+		mux.HandleFunc("/api/lan/discover", lanHandler.HandleDiscoverDevices)
+		mux.HandleFunc("/api/lan/initiate", lanHandler.HandleStartTransfer)
+		mux.HandleFunc("/api/lan/accept", lanHandler.HandleCancelTransfer)
+		mux.HandleFunc("/api/lan/status", lanHandler.HandleGetTransferStatus)
 	}
 
 	// Auth routes if enabled

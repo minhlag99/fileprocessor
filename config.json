@@ -1,0 +1,48 @@
+{
+  "server": {
+    "port": 8080,
+    "host": "0.0.0.0",
+    "uiDir": "./ui",
+    "uploadsDir": "./uploads",
+    "allowedOrigins": ["*"],
+    "readTimeout": 30,
+    "writeTimeout": 30,
+    "idleTimeout": 60,
+    "shutdownTimeout": 15
+  },
+  "storage": {
+    "defaultProvider": "local",
+    "local": {
+      "basePath": "./storage",
+      "tempPath": "./tmp"
+    },
+    "s3": {
+      "enabled": false,
+      "region": "us-east-1",
+      "bucket": "file-processor-bucket",
+      "endpoint": ""
+    },
+    "google": {
+      "enabled": false,
+      "bucket": "file-processor-bucket"
+    }
+  },
+  "processing": {
+    "workerCount": 4,
+    "queueSize": 100,
+    "maxFileSize": 104857600,
+    "allowedTypes": ["image/*", "text/*", "application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"]
+  },
+  "security": {
+    "authEnabled": false,
+    "jwtSecret": "change-this-in-production",
+    "cookieSecure": false,
+    "cookieDomain": "",
+    "corsEnabled": true
+  },
+  "features": {
+    "enableLANTransfer": true,
+    "enableWebSockets": true,
+    "enableDirectUpload": true
+  }
+}

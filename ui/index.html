@@ -987,22 +987,39 @@
                     if (message.content && message.content.progress) {
                         const progress = message.content.progress;
                         const fileName = message.content.file ? message.content.file.Name : '';
+                        const status = message.content.status || '';
                         
+                        console.log(`WebSocket progress update: ${progress}%, status: ${status}, task: ${message.taskId}`);
                         addLogMessage(`Processing progress: ${progress}% - ${fileName}`, 'info');
                         
                         // Update progress bar (scale from 33% to 90%)
                         updateTaskProgress(message.taskId, progress, `Processing: ${progress}%`);
                         
-                        // If we've reached 100%, mark as complete in case we don't get an explicit completion message
-                        if (progress >= 100) {
+                        // If we've reached 100% or status is complete, mark as complete
+                        if (progress >= 100 || status === 'complete') {
+                            document.getElementById('step2').className = 'step completed';
+                            document.getElementById('line2').className = 'step-line active';
+                            document.getElementById('step3').className = 'step active';
+                            
+                            // Set progress to 100% if it wasn't already
+                            if (progress < 100) {
+                                const progressBar = document.querySelector('.progress-bar');
+                                if (progressBar && progressBar.dataset.taskId === message.taskId) {
+                                    // Update to 100%
+                                    updateTaskProgress(message.taskId, 100, 'Processing complete!');
+                                }
+                            }
+                            
+                            // Force completion after 1 second if we don't receive a completion message
                             setTimeout(() => {
                                 const progressBar = document.querySelector('.progress-bar');
                                 if (progressBar && progressBar.dataset.taskId === message.taskId && 
-                                    !document.getElementById('step3').classList.contains('active')) {
-                                    console.log("Processing reached 100%, marking as complete");
-                                    document.getElementById('step2').className = 'step completed';
-                                    document.getElementById('line2').className = 'step-line active';
-                                    document.getElementById('step3').className = 'step active';
+                                    !document.getElementById('step3').classList.contains('completed')) {
+                                    document.getElementById('step3').className = 'step completed';
+                                    console.log("Forcing step 3 completion after timeout");
+                                    
+                                    // Refresh file list to show newly processed file
+                                    setTimeout(refreshFileList, 500);
                                 }
                             }, 1000);
                         }

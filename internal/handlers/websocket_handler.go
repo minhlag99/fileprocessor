@@ -19,10 +19,10 @@ import (
 	"github.com/example/fileprocessor/internal/config"
 )
 
-// Set conservative buffer sizes and timeouts for security
+// Set optimal buffer sizes for performance while maintaining security
 var upgrader = websocket.Upgrader{
-	ReadBufferSize:  4096,
-	WriteBufferSize: 4096,
+	ReadBufferSize:  32768, // Increased to 32KB for better performance
+	WriteBufferSize: 32768, // Increased to 32KB for better performance
 	CheckOrigin: func(r *http.Request) bool {
 		// Implement proper origin checking based on config
 		origin := r.Header.Get("Origin")
@@ -400,13 +400,22 @@ func (h *WebSocketHub) Unsubscribe(clientID, taskID string) {
 func (h *WebSocketHub) SendTaskUpdate(taskID string, updateType string, content interface{}) {
 	if taskID == "" || updateType == "" {
 		log.Printf("WARNING: Attempted to send task update with empty taskID or updateType")
-		log.Printf("Warning: Attempted to send task update with empty taskID or updateType")
 		return
 	}
 
 	// Log detailed information about the task update
 	contentJSON, _ := json.Marshal(content)
 	log.Printf("Sending task update: TaskID=%s, Type=%s, Content=%s", taskID, updateType, string(contentJSON))
+
+	// Check if we have subscribers for this task
+	h.mu.RLock()
+	subscribers, exists := h.tasks[taskID]
+	h.mu.RUnlock()
+
+	// If no subscribers, log a warning but still send the message to the broadcast channel
+	if !exists || len(subscribers) == 0 {
+		log.Printf("WARNING: No subscribers found for task %s, message might be dropped", taskID)
+	}
 
 	message := ServerMessage{
 		Type:      updateType,
@@ -415,10 +424,9 @@ func (h *WebSocketHub) SendTaskUpdate(taskID string, updateType string, content 
 		Timestamp: time.Now().UnixNano() / int64(time.Millisecond),
 		RequestID: generateShortID(),
 	}
-
 	// Check for subscribers to this task
 	h.mu.RLock()
-	subscribers, exists := h.tasks[taskID]
+	subscribers = h.tasks[taskID]
 	h.mu.RUnlock()
 
 	if !exists || len(subscribers) == 0 {

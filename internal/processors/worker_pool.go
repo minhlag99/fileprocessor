@@ -202,13 +202,20 @@ func (p *WorkerPool) worker(id int) {
 				// Mark task status as complete
 				task.Status = "complete"
 
+				// Create the completion update
+				completionUpdate := map[string]interface{}{
+					"status":          "complete",
+					"percentComplete": 100.0,
+					"result":          result,
+					"timestamp":       time.Now().UnixNano() / int64(time.Millisecond),
+				}
+
+				// Store the completed task status in cache for resilience
+				StoreCompletedTaskStatus(task.ID, completionUpdate)
+
 				// Make sure completion is propagated to any task status listeners
 				select {
-				case task.UpdateChan <- map[string]interface{}{
-					"status":   "complete",
-					"progress": 100,
-					"result":   result,
-				}:
+				case task.UpdateChan <- completionUpdate:
 					log.Printf("Task %s completion update sent successfully", task.ID)
 				default:
 					log.Printf("Warning: Couldn't send completion update for task %s", task.ID)
@@ -292,34 +299,67 @@ func GetTaskStatus(taskID string) map[string]interface{} {
 
 	if !exists {
 		// Task not found (it might have completed successfully)
-		// Here, return a completed status to handle the case where the task
-		// already finished and was removed from active tasks
+		// Check the completed tasks cache
+		if status, found := GetCompletedTaskStatus(taskID); found {
+			return status
+		}
+
+		// If not in the cache, return a completed status
 		return map[string]interface{}{
-			"status":   "complete",
-			"id":       taskID,
-			"progress": 100,
-			"message":  "Task completed",
+			"status":          "complete",
+			"id":              taskID,
+			"percentComplete": 100.0,
+			"message":         "Task completed",
 		}
 	}
 
-	// Basic status information
-	status := map[string]interface{}{
-		"status": task.Status,
-		"id":     task.ID,
-		"time":   time.Since(task.Timestamp).Seconds(),
-	}
+	// Check if we have any updates in the update channel
+	select {
+	case update := <-task.UpdateChan:
+		// Got an update, store it in the task's metadata
+		DefaultPool.mu.Lock()
+		if task.Status != "complete" && task.Status != "error" {
+			if status, ok := update["status"].(string); ok {
+				task.Status = status
+			} else {
+				task.Status = "processing"
+			}
+		}
+		DefaultPool.mu.Unlock()
 
-	// For tasks in progress, try to estimate completion percentage
-	// Default to 50% if we can't determine
-	if task.Status == "complete" {
-		status["progress"] = 100
-	} else if task.Status == "error" {
-		status["progress"] = 100
-		status["error"] = "Task failed"
-	} else {
-		status["progress"] = 50
-	}
+		// Add timestamp to the update
+		update["timestamp"] = time.Now().UnixNano() / int64(time.Millisecond)
+		update["id"] = task.ID
+		update["timeSinceStart"] = time.Since(task.Timestamp).Seconds()
 
-	log.Printf("GetTaskStatus for %s: %v", taskID, status)
-	return status
+		return update
+	default:
+		// No updates in the channel, return the current status
+		status := map[string]interface{}{
+			"status":         task.Status,
+			"id":             taskID,
+			"timeSinceStart": time.Since(task.Timestamp).Seconds(),
+			"timestamp":      time.Now().UnixNano() / int64(time.Millisecond),
+		}
+
+		// Calculate progress based on task status
+		if task.Status == "complete" {
+			status["percentComplete"] = 100.0
+		} else if task.Status == "error" {
+			status["percentComplete"] = 100.0
+			status["error"] = "Task failed"
+		} else if task.Status == "processing" {
+			// Use time-based progress estimation for smoother progress bars
+			elapsed := time.Since(task.Timestamp).Seconds()
+			estimatedProgressPercent := calculateProgressFromTime(elapsed)
+			status["percentComplete"] = estimatedProgressPercent
+			status["message"] = fmt.Sprintf("Processing... %.1f%%", estimatedProgressPercent)
+		} else {
+			// Default progress for queued tasks
+			status["percentComplete"] = 10.0
+			status["message"] = "Waiting in queue..."
+		}
+		log.Printf("GetTaskStatus for %s: %v", taskID, status)
+		return status
+	}
 }
