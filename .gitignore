@@ -2,5 +2,6 @@
 /.git/
 
 # Uploads and temporary files
+/storage
 /uploads
 /uploads/temp/

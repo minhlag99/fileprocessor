@@ -1,5 +1,16 @@
 // Fetch list of files from server
 function refreshFileList() {
+    console.log('refreshFileList function called');
+    
+    // Check if addLogMessage function exists
+    if (typeof addLogMessage !== 'function') {
+        console.error('addLogMessage function is not defined');
+        // Create a fallback function to prevent errors
+        window.addLogMessage = function(message, type) {
+            console.log(`[${type}] ${message}`);
+        };
+    }
+    
     const storageType = document.getElementById('listStorageType').value;
     let prefix = '';
     let apiUrl = '/api/list?storageType=' + storageType;
@@ -25,6 +36,7 @@ function refreshFileList() {
         apiUrl += `&prefix=${encodeURIComponent(prefix)}`;
     }
     
+    console.log('File list URL:', apiUrl);
     addLogMessage('Fetching file list...', 'info');
     
     // Show loading indication

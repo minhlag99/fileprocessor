@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -123,8 +124,11 @@ func (l *LocalStorage) Delete(ctx context.Context, id string) error {
 func (l *LocalStorage) List(ctx context.Context, prefix string) ([]FileInfo, error) {
 	var files []FileInfo
 
+	log.Printf("DEBUG: LocalStorage.List - BasePath=%s, Prefix=%s", l.basePath, prefix)
+
 	err := filepath.Walk(l.basePath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
+			log.Printf("WARN: Error walking path %s: %v", path, err)
 			return err
 		}
 
@@ -137,6 +141,8 @@ func (l *LocalStorage) List(ctx context.Context, prefix string) ([]FileInfo, err
 		if prefix != "" && !strings.HasPrefix(info.Name(), prefix) {
 			return nil
 		}
+
+		log.Printf("DEBUG: Found file: %s", path)
 
 		relPath, _ := filepath.Rel(l.basePath, path)
 

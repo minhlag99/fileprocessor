@@ -197,12 +197,12 @@ func (h *FileHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		log.Printf("WARNING: Could not verify stored file: %v", err)
 	} else {
 		log.Printf("DEBUG: File verification successful, metadata: %v", metaData)
-	}
+	} // Create a task ID for tracking (used even if not processing)
+	taskID := fmt.Sprintf("process-%s-%d", id, time.Now().UnixNano())
+
 	// Process file if requested
 	var processedFile *models.ProcessedFile
 	if processFile {
-		// Create a task ID for tracking
-		taskID := fmt.Sprintf("process-%s-%d", id, time.Now().UnixNano())
 
 		// Create a task function
 		processFn := func() (*processors.ProcessResult, error) {
@@ -337,11 +337,15 @@ func (h *FileHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 				case <-r.Context().Done():
 					// Request was cancelled
 				}
-			}()
+			}() // Do the actual processing
+			log.Printf("Starting actual file processing for task %s...", taskID)
+			result, err := processor.Process(r.Context(), reader, fileModel.Name, options)
 
-			// Do the actual processing
-			result, err := processor.Process(r.Context(), reader, fileModel.Name, options) // Cancel progress reporting goroutine immediately before sending completion
-			cancelProgress()                                                               // Send completion notification via WebSocket
+			// Cancel progress reporting goroutine immediately before sending completion
+			log.Printf("Processing task %s finished, canceling progress reporting...", taskID)
+			cancelProgress()
+
+			// Send completion notification via WebSocket
 			if err != nil {
 				log.Printf("Processing failed for file %s: %v", fileModel.Name, err)
 				DefaultWebSocketHub.SendTaskUpdate(taskID, "processing_failed", map[string]interface{}{
@@ -357,15 +361,17 @@ func (h *FileHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 					"error":    err.Error(),
 				})
 			} else {
-				log.Printf("Processing completed for file %s", fileModel.Name)
+				log.Printf("Processing completed successfully for file %s (task %s)", fileModel.Name, taskID)
 
 				// Send completion notification
+				log.Printf("Sending processing_completed WebSocket message for task %s", taskID)
 				DefaultWebSocketHub.SendTaskUpdate(taskID, "processing_completed", map[string]interface{}{
 					"file":    fileModel,
 					"summary": result.Summary,
 				})
 
 				// Also send final progress update to ensure UI updates
+				log.Printf("Sending final progress (100%%) update for task %s", taskID)
 				DefaultWebSocketHub.SendTaskUpdate(taskID, "processing_progress", map[string]interface{}{
 					"progress": 100,
 					"status":   "complete",
@@ -414,20 +420,27 @@ func (h *FileHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 			sendJSONResponse(w, response, http.StatusOK)
 			return
 		}
-	}
-
-	// Send response
+	} // Send response
 	response := models.APIResponse{
 		Success: true,
 		Message: "File uploaded successfully",
 	}
 
-	if processedFile != nil {
-		response.Data = processedFile
-	} else {
-		response.Data = fileModel
+	// Print request to check what's going on
+	log.Printf("Upload complete, sending response with taskID: %s", taskID)
+
+	// Include taskID directly in the response data
+	responseData := map[string]interface{}{
+		"taskId": taskID, // Always include taskId in the response
 	}
 
+	if processedFile != nil {
+		responseData["file"] = processedFile
+	} else {
+		responseData["file"] = fileModel
+	}
+
+	response.Data = responseData
 	sendJSONResponse(w, response, http.StatusOK)
 }
 
@@ -539,10 +552,13 @@ func (h *FileHandler) ListFiles(w http.ResponseWriter, r *http.Request) {
 			sendJSONError(w, fmt.Sprintf("Failed to create storage provider: %v", err), http.StatusBadRequest)
 			return
 		}
-	}
-	// List files
+	} // List files
+	log.Printf("DEBUG: Listing files from provider %s with basePath %s, prefix %s",
+		storageType, config.AppConfig.Storage.Local.BasePath, prefix)
+
 	files, err := provider.List(r.Context(), prefix)
 	if err != nil {
+		log.Printf("ERROR: Failed to list files: %v", err)
 		sendJSONError(w, fmt.Sprintf("Failed to list files: %v", err), http.StatusInternalServerError)
 		return
 	}
