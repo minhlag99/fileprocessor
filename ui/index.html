@@ -1463,9 +1463,10 @@
             }
             
             // Add log message
-            addLogMessage(`Processing progress: ${progress}% - ${status || ''}`, 'info');
-        }
-          // Mark a task as completed with results        function markTaskComplete(taskId, downloadUrl, resultData) {
+            addLogMessage(`Processing progress: ${progress}% - ${status || ''}`, 'info');        }
+        
+        // Mark a task as completed with results
+        function markTaskComplete(taskId, downloadUrl, resultData) {
             // Log the completion
             console.log("Task completed:", taskId, resultData);
             addLogMessage(`Task ${taskId} completed!`, 'success');
