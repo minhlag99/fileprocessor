@@ -17,6 +17,7 @@ import (
 
 	"github.com/example/fileprocessor/internal/auth"
 	"github.com/example/fileprocessor/internal/config"
+	"github.com/example/fileprocessor/internal/processors"
 )
 
 // Set optimal buffer sizes for performance while maintaining security
@@ -703,17 +704,25 @@ func (c *Client) readPump() {
 					TaskID:    clientMsg.TaskID,
 					Timestamp: time.Now().UnixNano() / int64(time.Millisecond),
 					RequestID: generateShortID(),
-				}
-
-				// Send current task status to the client immediately
+				} // Send current task status to the client immediately
 				// This helps clients that subscribe after processing has already started
 				log.Printf("Checking for existing task status for task %s", clientMsg.TaskID)
 
-				// Send a confirmation processing_progress at 50% to ensure client shows processing
+				// Get the actual task status instead of using hardcoded 50%
+				taskStatus := processors.GetTaskStatus(clientMsg.TaskID)
+				if taskStatus == nil {
+					// If no status found, assume task completed successfully
+					taskStatus = map[string]interface{}{
+						"status":          "complete",
+						"percentComplete": 100,
+					}
+				}
+
+				// Send the actual task progress
 				c.send <- ServerMessage{
 					Type:      "processing_progress",
 					TaskID:    clientMsg.TaskID,
-					Content:   map[string]interface{}{"progress": 50},
+					Content:   taskStatus,
 					Timestamp: time.Now().UnixNano() / int64(time.Millisecond),
 					RequestID: generateShortID(),
 				}

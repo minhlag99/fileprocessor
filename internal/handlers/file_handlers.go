@@ -564,16 +564,26 @@ func (h *FileHandler) ListFiles(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf("DEBUG: Listed %d files from storage provider %s with prefix %s", len(files), storageType, prefix)
-
 	// Convert to file models
 	var fileModels []*models.File
 	for _, file := range files {
-		log.Printf("DEBUG: Processing file listing: %s, ContentType: %s", file.Name, file.ContentType)
+		// Ensure we have valid values for all fields
+		fileName := file.Name
+		if fileName == "" {
+			fileName = "file_" + file.ID
+		}
+
+		contentType := file.ContentType
+		if contentType == "" {
+			contentType = "application/octet-stream"
+		}
+
+		log.Printf("DEBUG: Processing file listing: %s, ContentType: %s", fileName, contentType)
 		fileModel := &models.File{
 			ID:          file.ID,
-			Name:        file.Name,
+			Name:        fileName,
 			Size:        file.Size,
-			ContentType: file.ContentType,
+			ContentType: contentType,
 			StorageType: storageType,
 			StorageID:   file.ID,
 			Metadata:    file.Metadata,

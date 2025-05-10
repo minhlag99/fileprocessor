@@ -79,19 +79,24 @@ function refreshFileList() {
                         }
                         
                         const formattedDate = file.UploadedAt ? new Date(file.UploadedAt).toLocaleString() : 'Unknown';
+                          // Safe handling of potentially undefined properties
+                        const fileName = file.Name || 'Unknown File';
+                        const contentType = file.ContentType || 'Unknown';
+                        const storageId = file.StorageID || file.ID || '';
+                        const storageType = file.StorageType || 'local';
                         
                         row.innerHTML = `
-                            <td>${file.Name}</td>
-                            <td>${file.ContentType || 'Unknown'}</td>
+                            <td>${fileName}</td>
+                            <td>${contentType}</td>
                             <td>${fileSize} ${sizeUnit}</td>
                             <td>
                                 <div class="btn-group btn-group-sm">
-                                    <a href="/api/download?id=${file.StorageID}&storageType=${file.StorageType}" 
+                                    <a href="/api/download?id=${storageId}&storageType=${storageType}" 
                                        class="btn btn-primary" target="_blank">Download</a>
                                     <button class="btn btn-danger delete-file" 
-                                            data-id="${file.StorageID}" 
-                                            data-storage-type="${file.StorageType}" 
-                                            data-file-name="${file.Name}">Delete</button>
+                                            data-id="${storageId}" 
+                                            data-storage-type="${storageType}" 
+                                            data-file-name="${fileName}">Delete</button>
                                 </div>
                             </td>
                         `;

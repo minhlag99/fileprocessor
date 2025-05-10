@@ -145,7 +145,6 @@ func (l *LocalStorage) List(ctx context.Context, prefix string) ([]FileInfo, err
 		log.Printf("DEBUG: Found file: %s", path)
 
 		relPath, _ := filepath.Rel(l.basePath, path)
-
 		// Read metadata if exists
 		metadata := make(map[string]string)
 		metaPath := path + ".meta"
@@ -161,17 +160,45 @@ func (l *LocalStorage) List(ctx context.Context, prefix string) ([]FileInfo, err
 				}
 			}
 		}
-		// Extract the original filename from metadata if available
+
+		// Extract original filename and set defaults for missing values
 		fileName := info.Name()
 		if originalName, ok := metadata["filename"]; ok && originalName != "" {
 			fileName = originalName
+		} else {
+			// Try to extract original name from the ID (format: timestamp-filename)
+			parts := strings.SplitN(info.Name(), "-", 2)
+			if len(parts) > 1 {
+				// Replace underscores with spaces in the original filename
+				fileName = strings.Replace(parts[1], "_", " ", -1)
+			}
+		}
+
+		// Set default content type if missing
+		contentType := metadata["contentType"]
+		if contentType == "" {
+			contentType = "application/octet-stream"
+			// Try to determine content type from file extension
+			ext := strings.ToLower(filepath.Ext(fileName))
+			switch ext {
+			case ".pdf":
+				contentType = "application/pdf"
+			case ".jpg", ".jpeg":
+				contentType = "image/jpeg"
+			case ".png":
+				contentType = "image/png"
+			case ".txt":
+				contentType = "text/plain"
+			case ".doc", ".docx":
+				contentType = "application/msword"
+			}
 		}
 
 		files = append(files, FileInfo{
 			ID:          relPath,
 			Name:        fileName,
 			Size:        info.Size(),
-			ContentType: metadata["contentType"],
+			ContentType: contentType,
 			ModifiedAt:  info.ModTime().Unix(),
 			Metadata:    metadata,
 		})

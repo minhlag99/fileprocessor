@@ -4,6 +4,7 @@ package processors
 import (
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 )
@@ -232,13 +233,32 @@ func (p *WorkerPool) worker(id int) {
 
 			// Ensure proper cleanup after sending results/errors
 			// Make sure we close channels only once, after a delay
-			go func(taskID string, taskStatus string) {
+			go func(taskID string, taskStatus string, finalResult *ProcessResult, finalError error) {
 				// Allow a delay to ensure all consumers have had time to read the result
 				// Use longer delay for completed tasks to ensure websocket messages are delivered
 				if taskStatus == "complete" {
 					time.Sleep(2 * time.Second)
 				} else {
 					time.Sleep(1 * time.Second)
+				}
+
+				// Make sure the task is properly stored as completed in cache before removing
+				if taskStatus == "complete" {
+					completionUpdate := map[string]interface{}{
+						"status":          "complete",
+						"percentComplete": 100.0,
+						"result":          finalResult,
+						"timestamp":       time.Now().UnixNano() / int64(time.Millisecond),
+					}
+					StoreCompletedTaskStatus(taskID, completionUpdate)
+				} else if taskStatus == "error" && finalError != nil {
+					errorUpdate := map[string]interface{}{
+						"status":          "error",
+						"percentComplete": 100.0,
+						"error":           finalError.Error(),
+						"timestamp":       time.Now().UnixNano() / int64(time.Millisecond),
+					}
+					StoreCompletedTaskStatus(taskID, errorUpdate)
 				}
 
 				// Update status in map (safely remove task)
@@ -253,7 +273,7 @@ func (p *WorkerPool) worker(id int) {
 					log.Printf("Task %s cleanup completed", taskID)
 				}
 				p.mu.Unlock()
-			}(task.ID, task.Status)
+			}(task.ID, task.Status, result, err)
 		case <-p.quit:
 			log.Printf("Worker %d stopping", id)
 			return
@@ -293,24 +313,28 @@ func GetTaskStatus(taskID string) map[string]interface{} {
 		return nil
 	}
 
+	// First check if this task is in the completed tasks cache
+	if status, found := GetCompletedTaskStatus(taskID); found {
+		return status
+	}
+
 	DefaultPool.mu.RLock()
 	task, exists := DefaultPool.active[taskID]
 	DefaultPool.mu.RUnlock()
 
 	if !exists {
-		// Task not found (it might have completed successfully)
-		// Check the completed tasks cache
-		if status, found := GetCompletedTaskStatus(taskID); found {
-			return status
+		// Task not found but has an ID format that matches our generated IDs
+		if strings.HasPrefix(taskID, "process-") && len(taskID) > 20 {
+			// This looks like a valid task that probably completed
+			// Return a completed status
+			return map[string]interface{}{
+				"status":          "complete",
+				"id":              taskID,
+				"percentComplete": 100.0,
+				"message":         "Task completed",
+			}
 		}
-
-		// If not in the cache, return a completed status
-		return map[string]interface{}{
-			"status":          "complete",
-			"id":              taskID,
-			"percentComplete": 100.0,
-			"message":         "Task completed",
-		}
+		return nil
 	}
 
 	// Check if we have any updates in the update channel
